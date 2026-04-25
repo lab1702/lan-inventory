@@ -103,6 +103,24 @@ func (e EventType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(e.String())
 }
 
+func (e *EventType) UnmarshalJSON(b []byte) error {
+	var str string
+	if err := json.Unmarshal(b, &str); err != nil {
+		return err
+	}
+	switch str {
+	case "joined":
+		*e = EventJoined
+	case "updated":
+		*e = EventUpdated
+	case "left":
+		*e = EventLeft
+	default:
+		*e = EventJoined
+	}
+	return nil
+}
+
 // Event is the user-facing record shown in the Events tab and stored in the
 // in-session ring buffer.
 type Event struct {

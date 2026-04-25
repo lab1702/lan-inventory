@@ -72,3 +72,30 @@ func TestStatusJSONString(t *testing.T) {
 		}
 	}
 }
+
+func TestEventTypeJSONRoundTrip(t *testing.T) {
+	cases := []struct {
+		etype model.EventType
+		want  string
+	}{
+		{model.EventJoined, `"joined"`},
+		{model.EventUpdated, `"updated"`},
+		{model.EventLeft, `"left"`},
+	}
+	for _, c := range cases {
+		bytes, err := json.Marshal(c.etype)
+		if err != nil {
+			t.Fatalf("marshal %v: %v", c.etype, err)
+		}
+		if string(bytes) != c.want {
+			t.Errorf("marshal %v: got %s want %s", c.etype, bytes, c.want)
+		}
+		var back model.EventType
+		if err := json.Unmarshal(bytes, &back); err != nil {
+			t.Fatalf("unmarshal %s: %v", bytes, err)
+		}
+		if back != c.etype {
+			t.Errorf("round-trip %v: got %v", c.etype, back)
+		}
+	}
+}
