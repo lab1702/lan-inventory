@@ -15,8 +15,8 @@ type Info struct {
 	HostIP net.IP // our own IP on this interface
 }
 
-// MaxPrefixOnesAllowed is the maximum prefix length that's "small enough" — a
-// /22 and below is permitted. Anything larger (e.g., /20, /16) is refused.
+// MinPrefixOnesAllowed is the minimum prefix-ones count permitted — /22 (ones=22)
+// and smaller subnets are accepted. Anything bigger (e.g., /20, /16) is refused.
 const MinPrefixOnesAllowed = 22 // ones >= 22 ⇒ subnet ≤ /22
 
 // ErrSubnetTooLarge is returned by CheckSubnetSize when the subnet is bigger
@@ -53,7 +53,7 @@ func SubnetIPs(subnet *net.IPNet) []net.IP {
 		ones, _ := subnet.Mask.Size()
 		isNetwork := equalIP(cur, subnet.IP.Mask(subnet.Mask))
 		isBroadcast := isBroadcastAddr(cur, subnet)
-		if !isNetwork && !isBroadcast || ones == 32 || ones == 31 {
+		if (!isNetwork && !isBroadcast) || ones == 32 || ones == 31 {
 			out = append(out, append(net.IP{}, cur...))
 		}
 		// increment

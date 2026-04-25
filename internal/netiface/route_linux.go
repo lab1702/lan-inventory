@@ -37,7 +37,9 @@ func defaultRouteInterface() (*net.Interface, error) {
 			continue
 		}
 		var metric int
-		fmt.Sscanf(fields[6], "%d", &metric)
+		if _, err := fmt.Sscanf(fields[6], "%d", &metric); err != nil {
+			continue
+		}
 		if best == nil || metric < best.metric {
 			best = &cand{iface: fields[0], metric: metric}
 		}
