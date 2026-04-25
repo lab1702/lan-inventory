@@ -1,0 +1,12 @@
+# Trimmed Wireshark manuf format: OUI <tab> short <tab> long
+# A full database can be substituted later; format is `XX:XX:XX\t<short>\t<long>`.
+00:1B:63	Apple	Apple, Inc.
+3C:22:FB	Apple	Apple, Inc.
+B8:27:EB	RaspberryPi	Raspberry Pi Foundation
+DC:A6:32	RaspberryPi	Raspberry Pi Foundation
+D8:0F:99	TP-Link	TP-LINK TECHNOLOGIES CO.,LTD.
+A4:C3:F0	Sonos	Sonos, Inc.
+FC:FF:AA	HP	Hewlett Packard
+74:C2:46	Espressif	Espressif Inc.
+18:B4:30	NestLabs	Nest Labs Inc.
+90:48:9A	Tuya	Tuya Smart Inc.
