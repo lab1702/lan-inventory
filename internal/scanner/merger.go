@@ -55,12 +55,10 @@ func (m *Merger) Snapshot() []*model.Device {
 	defer m.mu.RUnlock()
 	out := make([]*model.Device, 0, len(m.byMAC)+len(m.byIP))
 	for _, d := range m.byMAC {
-		cp := *d
-		out = append(out, &cp)
+		out = append(out, copyDevice(d))
 	}
 	for _, d := range m.byIP {
-		cp := *d
-		out = append(out, &cp)
+		out = append(out, copyDevice(d))
 	}
 	return out
 }
@@ -108,11 +106,13 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 			created = true
 			m.byMAC[mac] = dev
 		}
-		// Migrate IP-only entry if present
+		// Migrate IP-only entry if present — the device was already known under
+		// the IP key, so this is a refinement (Updated), not a new sighting (Joined).
 		if ipKey != "" {
 			if old, ok := m.byIP[ipKey]; ok && old != dev {
 				mergeFromIPOnly(dev, old)
 				delete(m.byIP, ipKey)
+				created = false
 			}
 		}
 	case ipKey != "":

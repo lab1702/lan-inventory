@@ -98,6 +98,12 @@ func TestMergerIPOnlyThenMACMerges(t *testing.T) {
 	if last.Device.RTT != 1*time.Millisecond {
 		t.Errorf("RTT should be preserved across merge, got %v", last.Device.RTT)
 	}
+	if events[0].Type != model.EventJoined {
+		t.Errorf("first event (IP-only sighting) should be Joined, got %v", events[0].Type)
+	}
+	if events[1].Type != model.EventUpdated {
+		t.Errorf("second event (MAC arrived for known IP) should be Updated, got %v", events[1].Type)
+	}
 }
 
 func TestMergerLeftAfterTimeout(t *testing.T) {
