@@ -111,7 +111,12 @@ func TestOSDetect(t *testing.T) {
 		{"No signals -> empty", "", nil, nil, false, 0, ""},
 		{"Apple Watch -> iOS", "Apple", svcs("model=Watch6,1"), nil, false, 64, "iOS"},
 		{"Apple _companion-link -> macOS", "Apple", svcs("_companion-link._tcp"), nil, false, 64, "macOS"},
-		{"Roku _airplay -> empty (no Apple OUI)", "Roku", svcs("_airplay._tcp"), nil, false, 0, ""},
+		{"Roku alone -> Network (IoT family)", "Roku", nil, nil, false, 64, "Network"},
+		{"Samsung Electronics -> Network (IoT family)", "Samsung Electronics Co.,Ltd", nil, nil, false, 64, "Network"},
+		{"Unknown vendor _airplay -> empty", "GenericVendor", svcs("_airplay._tcp"), nil, false, 0, ""},
+		{"port 9100 alone -> Network (printer-port rule)", "", nil, port(9100), false, 64, "Network"},
+		{"port 631 alone -> Network (printer-port rule)", "", nil, port(631), false, 64, "Network"},
+		{"Canon-style: ports 631 + 9100, no vendor -> Network", "", nil, []model.Port{{Number: 631, Proto: "tcp"}, {Number: 9100, Proto: "tcp"}}, false, 64, "Network"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
