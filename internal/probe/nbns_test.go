@@ -173,3 +173,52 @@ func TestNBNSLocalhostSmoke(t *testing.T) {
 	// only verify the function doesn't panic or hang past the timeout.
 	_ = NBNS(ctx, "127.0.0.1")
 }
+
+func TestSanitizeNetBIOSName(t *testing.T) {
+	build := func(prefix string, padByte byte) []byte {
+		out := make([]byte, 15)
+		for i := range out {
+			out[i] = padByte
+		}
+		copy(out, prefix)
+		return out
+	}
+	cases := []struct {
+		name  string
+		input []byte
+		want  string
+	}{
+		{
+			name:  "all-ASCII space-padded",
+			input: build("HOSTNAME", ' '),
+			want:  "HOSTNAME",
+		},
+		{
+			name:  "non-printable byte terminates name",
+			input: append([]byte("OUP"), 0xC2, 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'),
+			want:  "OUP",
+		},
+		{
+			name:  "NUL-padded after name",
+			input: append([]byte("MYHOST"), 0, 0, 0, 0, 0, 0, 0, 0, 0),
+			want:  "MYHOST",
+		},
+		{
+			name:  "all spaces",
+			input: build("", ' '),
+			want:  "",
+		},
+		{
+			name:  "starts with non-printable",
+			input: append([]byte{0xFF}, []byte("HOSTNAME      ")...),
+			want:  "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := sanitizeNetBIOSName(c.input); got != c.want {
+				t.Errorf("sanitizeNetBIOSName(%v) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
