@@ -20,9 +20,7 @@ var (
 	styleTabActive   = styleAccent.Bold(true).Underline(true)
 	styleTabInactive = styleDim
 	styleHeaderRow   = styleBold
-	styleSelectedRow = lipgloss.NewStyle().
-				Background(lipgloss.ANSIColor(4)).
-				Foreground(lipgloss.ANSIColor(15))
+	styleSelectedRow = lipgloss.NewStyle().Reverse(true)
 )
 
 // styleStatus returns the foreground style appropriate for a Device.Status
