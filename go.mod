@@ -2,7 +2,10 @@ module github.com/lab1702/lan-inventory
 
 go 1.24.0
 
-require github.com/prometheus-community/pro-bing v0.8.0
+require (
+	github.com/google/gopacket v1.1.19
+	github.com/prometheus-community/pro-bing v0.8.0
+)
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
