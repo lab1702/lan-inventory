@@ -59,7 +59,7 @@ refresh time.
 | `Makefile`                 | Modify | Add `manuf-refresh` target.                                       |
 | `internal/oui/oui.go`      | Modify | Skip lines whose prefix column contains `/` (defense-in-depth). |
 | `internal/oui/manuf.txt`   | Replace | Seed 10 → ~38k 24-bit OUI lines.                                 |
-| `internal/oui/MANUF-LICENSE` | Add  | Upstream Wireshark license (BSD-3) for the manuf data.           |
+| `internal/oui/MANUF-LICENSE` | Add  | Upstream Wireshark license (GPL-2) for the manuf data.           |
 | `README.md`                | Modify | One-line note in Development section.                             |
 
 No new dependencies. No new packages.
