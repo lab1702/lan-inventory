@@ -61,6 +61,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 		HostIPs:     hosts,
 		Gateway:     s.cfg.Iface.Gateway,
 		WorkerCount: 32,
+		KnownIPs:    s.merger.KnownIPs,
 	}
 	s.active.Store(active)
 

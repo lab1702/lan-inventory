@@ -18,6 +18,12 @@ type ActiveWorker struct {
 	Gateway     net.IP   // default-route gateway IP for the gateway-resolver hostname probe
 	Interval    time.Duration
 	WorkerCount int
+	// KnownIPs returns the set of ARP-confirmed IP addresses (string form).
+	// When set, the worker bypasses the liveness gate for these IPs and
+	// runs the enrichment chain regardless — useful for hosts that
+	// stealth-drop ICMP/TCP probes (Windows 11 default firewall) but
+	// still respond to UDP-based queries like NBNS. Optional.
+	KnownIPs func() map[string]struct{}
 }
 
 func (w *ActiveWorker) Run(ctx context.Context, out chan<- Update) error {
@@ -49,6 +55,12 @@ func (w *ActiveWorker) SweepOnce(ctx context.Context, out chan<- Update) {
 }
 
 func (w *ActiveWorker) sweepOnce(ctx context.Context, out chan<- Update) {
+	// Snapshot the ARP-confirmed IPs once per sweep so all worker goroutines
+	// see a consistent view of "known".
+	var known map[string]struct{}
+	if w.KnownIPs != nil {
+		known = w.KnownIPs()
+	}
 	jobs := make(chan net.IP, len(w.HostIPs))
 	var wg sync.WaitGroup
 	for i := 0; i < w.WorkerCount; i++ {
@@ -56,7 +68,8 @@ func (w *ActiveWorker) sweepOnce(ctx context.Context, out chan<- Update) {
 		go func() {
 			defer wg.Done()
 			for ip := range jobs {
-				w.probeOne(ctx, ip, out)
+				_, isKnown := known[ip.String()]
+				w.probeOne(ctx, ip, isKnown, out)
 			}
 		}()
 	}
@@ -73,7 +86,7 @@ func (w *ActiveWorker) sweepOnce(ctx context.Context, out chan<- Update) {
 	wg.Wait()
 }
 
-func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Update) {
+func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, isKnown bool, out chan<- Update) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -81,14 +94,23 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Updat
 	pingRes, _ := probe.Ping(ctx, ip.String())
 	var ttl int
 	var rtt time.Duration
-	if pingRes.Alive {
+	alive := pingRes.Alive
+	if alive {
 		ttl = pingRes.TTL
 		rtt = pingRes.RTT
-	} else if !probe.TCPAlive(ctx, ip.String()) {
-		// Neither ICMP nor TCP saw any sign of life — give up.
+	} else if probe.TCPAlive(ctx, ip.String()) {
+		// TCP signal of life (success or RST) — proceed without TTL/RTT.
+		alive = true
+	} else if isKnown {
+		// ARP confirms this device exists. Run enrichment regardless —
+		// the host may stealth-drop ICMP/TCP probes (Windows 11 Firewall
+		// default) but still respond to UDP-based probes like NBNS.
+		alive = true
+	}
+	if !alive {
 		return
 	}
-	// Host is alive (ICMP or TCP-confirmed). Run the full enrichment chain.
+	// Run the full enrichment chain.
 	nbnsName := probe.NBNS(ctx, ip.String())
 	update := Update{
 		Source:        "active",

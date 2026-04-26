@@ -64,6 +64,25 @@ func (m *Merger) Snapshot() []*model.Device {
 	return out
 }
 
+// KnownIPs returns the set of IP addresses owned by ARP-confirmed devices
+// (those keyed by MAC). IP-only entries are excluded since they were created
+// by the active worker itself and don't constitute independent confirmation.
+//
+// Used by the active worker to skip the liveness gate for IPs we already
+// know are real — e.g., Windows hosts that stealth-drop ICMP and TCP probes
+// but were captured by the passive ARP listener.
+func (m *Merger) KnownIPs() map[string]struct{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := map[string]struct{}{}
+	for _, d := range m.byMAC {
+		for _, ip := range d.IPs {
+			out[ip.String()] = struct{}{}
+		}
+	}
+	return out
+}
+
 // Run consumes updates from in and publishes events to out. Returns when ctx
 // is cancelled.
 func (m *Merger) Run(ctx context.Context, in <-chan Update, out chan<- model.DeviceEvent) {
