@@ -30,6 +30,9 @@ func loadTable() {
 			continue
 		}
 		prefix := strings.ToUpper(strings.TrimSpace(parts[0]))
+		if strings.Contains(prefix, "/") {
+			continue
+		}
 		short := strings.TrimSpace(parts[1])
 		if prefix == "" || short == "" {
 			continue
