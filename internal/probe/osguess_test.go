@@ -1,9 +1,7 @@
-package probe_test
+package probe
 
 import (
 	"testing"
-
-	"github.com/lab1702/lan-inventory/internal/probe"
 )
 
 func TestOSGuess(t *testing.T) {
@@ -25,9 +23,39 @@ func TestOSGuess(t *testing.T) {
 		{1, ""},                   // nonsense
 	}
 	for _, c := range cases {
-		got := probe.OSGuess(c.ttl)
+		got := OSGuess(c.ttl)
 		if got != c.want {
 			t.Errorf("OSGuess(%d) = %q, want %q", c.ttl, got, c.want)
+		}
+	}
+}
+
+func TestVendorFamily(t *testing.T) {
+	cases := []struct {
+		vendor string
+		want   string
+	}{
+		{"Apple, Inc.", "Apple"},
+		{"Apple", "Apple"},
+		{"Raspberry Pi Foundation", "LinuxBoard"},
+		{"RaspberryPiF", "LinuxBoard"},
+		{"Synology Incorporated", "LinuxBoard"},
+		{"TP-LINK TECHNOLOGIES CO.,LTD.", "Network"},
+		{"Netgear", "Network"},
+		{"Ubiquiti Networks Inc.", "Network"},
+		{"Cisco Systems, Inc", "Network"},
+		{"Hewlett Packard", "Printer"},
+		{"HP", "Printer"},
+		{"Canon Inc.", "Printer"},
+		{"Espressif Inc.", "IoT"},
+		{"Sonos, Inc.", "IoT"},
+		{"WyzeLabs", "IoT"},
+		{"", ""},
+		{"SomeUnknownVendor", ""},
+	}
+	for _, c := range cases {
+		if got := vendorFamily(c.vendor); got != c.want {
+			t.Errorf("vendorFamily(%q) = %q, want %q", c.vendor, got, c.want)
 		}
 	}
 }
