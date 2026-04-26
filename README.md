@@ -2,6 +2,19 @@
 
 A zero-config home-LAN inventory tool. Run it, see your network.
 
+A single Go binary that auto-discovers devices on your local /24, presents a
+live TUI dashboard, and can also dump a one-shot JSON or text snapshot for
+scripts and cron.
+
+## What it shows
+
+- IP, MAC, vendor (OUI lookup)
+- Hostname (mDNS preferred, reverse DNS fallback)
+- OS family guess (TTL-based)
+- Common open ports with service labels
+- mDNS service announcements
+- Last-seen timestamp and online/stale/offline status
+
 ## Install
 
 ```bash
@@ -17,14 +30,47 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./bin/lan-inventory
 ./bin/lan-inventory
 ```
 
+The `setcap` step is needed once; `lan-inventory` requires raw-socket access
+to sniff ARP packets and send ICMP ping. Without it the tool refuses to start.
+
 ## Usage
 
 ```bash
-lan-inventory               # interactive TUI dashboard
-lan-inventory --once        # one scan, print JSON, exit
-lan-inventory --once --table # one scan, print table, exit
+lan-inventory                 # interactive TUI dashboard
+lan-inventory --once          # single scan, JSON to stdout, exit
+lan-inventory --once --table  # single scan, human-readable table, exit
 lan-inventory --version
-lan-inventory --help
 ```
 
-See `docs/superpowers/specs/` for the design.
+### TUI keys
+
+- `1`–`4` switch tabs (Devices / Services / Subnet / Events)
+- `↑/↓` navigate
+- `Enter` drill into a device
+- `q` or `Esc` quit
+- `?` help overlay
+
+### Exit codes (non-interactive)
+
+| Code | Meaning |
+|------|---------|
+| 0    | Success |
+| 1    | Runtime error |
+| 2    | Configuration error (no privilege, no default route, oversized subnet) |
+| 3    | No devices discovered |
+
+## Limitations
+
+- IPv4 only.
+- Targets /24 home networks; subnets larger than /22 are refused.
+- No persistence: state is wiped on quit.
+- Linux first; macOS support depends on libpcap availability.
+
+## Development
+
+```bash
+make test     # run all unit tests
+make vet      # go vet
+make lint     # staticcheck
+make smoke    # build, setcap, and run --once --table on your live network
+```
