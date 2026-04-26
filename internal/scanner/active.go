@@ -77,18 +77,26 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Updat
 	if ctx.Err() != nil {
 		return
 	}
-	pingRes, err := probe.Ping(ctx, ip.String())
-	if err != nil || !pingRes.Alive {
+	// ICMP first — gives us TTL (used by OSDetect) and RTT.
+	pingRes, _ := probe.Ping(ctx, ip.String())
+	var ttl int
+	var rtt time.Duration
+	if pingRes.Alive {
+		ttl = pingRes.TTL
+		rtt = pingRes.RTT
+	} else if !probe.TCPAlive(ctx, ip.String()) {
+		// Neither ICMP nor TCP saw any sign of life — give up.
 		return
 	}
+	// Host is alive (ICMP or TCP-confirmed). Run the full enrichment chain.
 	nbnsName := probe.NBNS(ctx, ip.String())
 	update := Update{
 		Source:        "active",
 		Time:          time.Now(),
 		IP:            ip,
 		Alive:         true,
-		RTT:           pingRes.RTT,
-		TTL:           pingRes.TTL,
+		RTT:           rtt,
+		TTL:           ttl,
 		Hostname:      probe.ResolveHostname(ctx, ip.String(), w.Gateway),
 		OpenPorts:     probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
 		NBNSResponded: nbnsName != "",
