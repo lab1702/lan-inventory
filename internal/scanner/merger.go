@@ -265,6 +265,12 @@ func mergeFromIPOnly(dst, src *model.Device) {
 	if src.LastSeen.After(dst.LastSeen) {
 		dst.LastSeen = src.LastSeen
 	}
+	if dst.TTL == 0 {
+		dst.TTL = src.TTL
+	}
+	if src.NBNSResponded {
+		dst.NBNSResponded = true
+	}
 }
 
 func containsIP(list []net.IP, ip net.IP) bool {
@@ -301,7 +307,21 @@ func copyDevice(d *model.Device) *model.Device {
 	cp := *d
 	cp.IPs = append([]net.IP(nil), d.IPs...)
 	cp.OpenPorts = append([]model.Port(nil), d.OpenPorts...)
-	cp.Services = append([]model.ServiceInst(nil), d.Services...)
 	cp.RTTHistory = append([]time.Duration(nil), d.RTTHistory...)
+	// Deep-copy services so each TXT map is independent of the live device.
+	if len(d.Services) > 0 {
+		cp.Services = make([]model.ServiceInst, len(d.Services))
+		copy(cp.Services, d.Services)
+		for i := range cp.Services {
+			if d.Services[i].TXT != nil {
+				cp.Services[i].TXT = make(map[string]string, len(d.Services[i].TXT))
+				for k, v := range d.Services[i].TXT {
+					cp.Services[i].TXT[k] = v
+				}
+			}
+		}
+	} else {
+		cp.Services = nil
+	}
 	return &cp
 }
