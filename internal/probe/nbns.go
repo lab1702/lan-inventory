@@ -118,11 +118,29 @@ func parseNBNSResponse(buf []byte) string {
 		if flagsHigh&0x80 != 0 {
 			continue
 		}
-		name := strings.TrimRight(string(nameBytes), " ")
+		name := sanitizeNetBIOSName(nameBytes)
 		if name == "" {
 			continue
 		}
 		return name
 	}
 	return ""
+}
+
+// sanitizeNetBIOSName converts the 15-byte name field from an NBNS name
+// record into a printable string. Per RFC 1001 §14, NetBIOS names are
+// case-insensitive ASCII strings padded with spaces; in practice some
+// devices fill the field with non-printable bytes (extended-ASCII or
+// NUL-terminated then garbage), which display as replacement characters
+// in a UTF-8 terminal. We treat the first non-printable-ASCII byte as
+// end-of-name and trim trailing spaces.
+func sanitizeNetBIOSName(nameBytes []byte) string {
+	out := make([]byte, 0, len(nameBytes))
+	for _, c := range nameBytes {
+		if c < 0x20 || c > 0x7E {
+			break
+		}
+		out = append(out, c)
+	}
+	return strings.TrimRight(string(out), " ")
 }
