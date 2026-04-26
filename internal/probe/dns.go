@@ -66,3 +66,30 @@ func ReverseDNSMDNS(ctx context.Context, ip string) string {
 	}
 	return strings.TrimSuffix(names[0], ".")
 }
+
+// ResolveHostname tries multiple lookup paths in priority order and returns
+// the first non-empty answer. Each probe has its own bounded timeout so the
+// chain is bounded by the sum of probe timeouts even on dead hosts.
+//
+// Order:
+//   1. system rDNS
+//   2. gateway-as-resolver (if gatewayIP is non-nil)
+//   3. NBNS (UDP 137)
+//   4. mDNS reverse (UDP 5353 unicast)
+func ResolveHostname(ctx context.Context, ip string, gatewayIP net.IP) string {
+	if name := ReverseDNS(ctx, ip); name != "" {
+		return name
+	}
+	if gatewayIP != nil {
+		if name := ReverseDNSVia(ctx, ip, gatewayIP.String()); name != "" {
+			return name
+		}
+	}
+	if name := NBNS(ctx, ip); name != "" {
+		return name
+	}
+	if name := ReverseDNSMDNS(ctx, ip); name != "" {
+		return name
+	}
+	return ""
+}
