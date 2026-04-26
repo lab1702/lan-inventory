@@ -116,7 +116,13 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 			}
 		}
 	case ipKey != "":
-		if existing, ok := m.byIP[ipKey]; ok {
+		// First check if any existing MAC-keyed device already owns this IP.
+		// Without this guard, an active-prober Update (which carries no MAC)
+		// against an IP already filed under a MAC would create a phantom
+		// IP-keyed entry alongside the MAC-keyed one.
+		if found := m.findInMACByIP(u.IP); found != nil {
+			dev = found
+		} else if existing, ok := m.byIP[ipKey]; ok {
 			dev = existing
 		} else {
 			dev = &model.Device{FirstSeen: u.Time, Status: model.StatusOnline}
@@ -263,6 +269,18 @@ func containsIP(list []net.IP, ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+// findInMACByIP scans the MAC-keyed device map for any device that already
+// owns the given IP. Returns nil if no such device exists. Caller must hold
+// m.mu. O(N) over the device map; N is small for home LANs.
+func (m *Merger) findInMACByIP(ip net.IP) *model.Device {
+	for _, d := range m.byMAC {
+		if containsIP(d.IPs, ip) {
+			return d
+		}
+	}
+	return nil
 }
 
 func containsService(list []model.ServiceInst, s model.ServiceInst) bool {
