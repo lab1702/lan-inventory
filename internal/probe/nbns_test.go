@@ -127,6 +127,19 @@ func TestParseNBNSResponseTrimsSpaces(t *testing.T) {
 	}
 }
 
+func TestParseNBNSResponseSkipsNonWorkstationSuffix(t *testing.T) {
+	// Suffix 0x20 = File Server. The parser should skip it and return "".
+	resp := makeNBNSResponse(
+		[]string{"FILESERVER"},
+		[]byte{0x20},
+		[]bool{false},
+	)
+	got := parseNBNSResponse(resp)
+	if got != "" {
+		t.Errorf("non-Workstation suffix should yield empty, got %q", got)
+	}
+}
+
 func TestNBNSQueryFormat(t *testing.T) {
 	if len(nbnsQuery) != 50 {
 		t.Fatalf("nbnsQuery length: got %d, want 50", len(nbnsQuery))
