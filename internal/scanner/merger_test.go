@@ -133,3 +133,35 @@ func TestMergerLeftAfterTimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestMergerActiveAfterARPDoesNotDuplicate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan Update, 16)
+	out := make(chan model.DeviceEvent, 16)
+	m := NewMerger(MergerOptions{LeftAfter: time.Hour})
+	go m.Run(ctx, in, out)
+
+	// Step 1: ARP files the device under MAC.
+	in <- Update{Source: "arp", Time: time.Now(), MAC: "aa:bb:cc:dd:ee:ff", IP: net.ParseIP("192.168.1.50")}
+	// Step 2: Active prober pings the same IP — emits an Update with no MAC.
+	in <- Update{Source: "active", Time: time.Now(), IP: net.ParseIP("192.168.1.50"), Alive: true, RTT: 1 * time.Millisecond}
+
+	collectEvents(out, 2, 300*time.Millisecond)
+
+	devices := m.Snapshot()
+	if len(devices) != 1 {
+		t.Errorf("expected 1 device after ARP+active for same IP, got %d", len(devices))
+		for i, d := range devices {
+			t.Logf("device[%d]: MAC=%q IPs=%v RTT=%v", i, d.MAC, d.IPs, d.RTT)
+		}
+		return
+	}
+	if devices[0].MAC != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("MAC lost on merge: got %q, want aa:bb:cc:dd:ee:ff", devices[0].MAC)
+	}
+	if devices[0].RTT != 1*time.Millisecond {
+		t.Errorf("RTT not merged from active update: got %v, want 1ms", devices[0].RTT)
+	}
+}
