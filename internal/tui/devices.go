@@ -53,19 +53,45 @@ func (m Model) viewDevices() string {
 		if i == m.selectedRow {
 			marker = "> "
 		}
-		row := strings.Join([]string{
-			padRight(firstIP(d), wIP),
-			padRight(d.MAC, wMAC),
-			padRight(dimIfEmpty(truncate(d.Vendor, 12)), wVendor),
-			padRight(dimIfEmpty(truncate(d.Hostname, 22)), wHost),
-			padRight(dimIfEmpty(truncate(d.OSGuess, 12)), wOS),
-			padRight(dimIfEmpty(truncate(portsCSV(d.OpenPorts), 22)), wPorts),
-			padRight(rttString(d.RTT), wRTT),
-			styleStatus(d.Status).Render(d.Status.String()),
-		}, "  ")
-		line := marker + row
+		// Compute the un-styled cell content once. Padding and per-cell
+		// styling depend on whether this row is selected: selected rows
+		// must be plain (no inner ANSI) so styleSelectedRow's Reverse
+		// attribute applies uniformly across the whole line — inner
+		// resets in styled cells would clobber it mid-row.
+		ipCell := firstIP(d)
+		macCell := d.MAC
+		vendorCell := truncate(d.Vendor, 12)
+		hostCell := truncate(d.Hostname, 22)
+		osCell := truncate(d.OSGuess, 12)
+		portsCell := truncate(portsCSV(d.OpenPorts), 22)
+		rttCell := rttString(d.RTT)
+		statusCell := d.Status.String()
+
+		var line string
 		if i == m.selectedRow {
-			line = styleSelectedRow.Render(line)
+			cells := []string{
+				padRight(ipCell, wIP),
+				padRight(macCell, wMAC),
+				padRight(vendorCell, wVendor),
+				padRight(hostCell, wHost),
+				padRight(osCell, wOS),
+				padRight(portsCell, wPorts),
+				padRight(rttCell, wRTT),
+				statusCell,
+			}
+			line = styleSelectedRow.Render(marker + strings.Join(cells, "  "))
+		} else {
+			cells := []string{
+				padRight(ipCell, wIP),
+				padRight(macCell, wMAC),
+				padRight(dimIfEmpty(vendorCell), wVendor),
+				padRight(dimIfEmpty(hostCell), wHost),
+				padRight(dimIfEmpty(osCell), wOS),
+				padRight(dimIfEmpty(portsCell), wPorts),
+				padRight(rttCell, wRTT),
+				styleStatus(d.Status).Render(statusCell),
+			}
+			line = marker + strings.Join(cells, "  ")
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
