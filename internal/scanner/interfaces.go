@@ -17,7 +17,6 @@ type Update struct {
 	IP            net.IP             // required for nearly every update
 	Hostname      string             // mDNS or rDNS
 	Vendor        string             // OUI lookup may have already been applied
-	OSGuess       string             // active prober only
 	OpenPorts     []model.Port       // active prober only; empty replaces existing
 	Services      []model.ServiceInst // mDNS only; appended/deduped
 	RTT           time.Duration      // active prober only

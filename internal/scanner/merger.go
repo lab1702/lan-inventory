@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lab1702/lan-inventory/internal/model"
+	"github.com/lab1702/lan-inventory/internal/probe"
 )
 
 // MergerOptions tunes the merger's timing behavior.
@@ -198,9 +199,6 @@ func mergeUpdate(dev *model.Device, u Update) {
 	if u.Vendor != "" {
 		dev.Vendor = u.Vendor
 	}
-	if u.OSGuess != "" {
-		dev.OSGuess = u.OSGuess
-	}
 	if u.OpenPorts != nil {
 		dev.OpenPorts = u.OpenPorts
 	}
@@ -232,6 +230,7 @@ func mergeUpdate(dev *model.Device, u Update) {
 	// The sweep handles decay back to Stale/Offline based on age.
 	dev.Status = model.StatusOnline
 	sort.Slice(dev.OpenPorts, func(i, j int) bool { return dev.OpenPorts[i].Number < dev.OpenPorts[j].Number })
+	dev.OSGuess = probe.OSDetect(dev, dev.NBNSResponded)
 }
 
 func mergeFromIPOnly(dst, src *model.Device) {

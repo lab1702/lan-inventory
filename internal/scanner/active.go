@@ -89,7 +89,6 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Updat
 		Alive:         true,
 		RTT:           pingRes.RTT,
 		TTL:           pingRes.TTL,
-		OSGuess:       probe.OSGuess(pingRes.TTL),
 		Hostname:      probe.ResolveHostname(ctx, ip.String(), w.Gateway),
 		OpenPorts:     probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
 		NBNSResponded: nbnsName != "",
