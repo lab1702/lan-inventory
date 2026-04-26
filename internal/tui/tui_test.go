@@ -174,19 +174,24 @@ func TestSortCycleByKey(t *testing.T) {
 	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
 	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
-	time.Sleep(1500 * time.Millisecond) // initial render with default sort (IP)
-	// Drain accumulated output so the subsequent read only captures the post-sort frame.
+	time.Sleep(1500 * time.Millisecond) // initial render with default sort (MAC)
+	// Drain accumulated output so the subsequent read only captures post-sort frames.
 	_, _ = io.ReadAll(tm.Output())
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // cycle to Hostname
-	time.Sleep(500 * time.Millisecond)
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // MAC → IP
+	time.Sleep(100 * time.Millisecond)
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // IP → Hostname
+	time.Sleep(1500 * time.Millisecond) // give a tick a chance to re-render with the new sort
 	out, err := io.ReadAll(tm.Output())
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	// After cycling to hostname-sort, "alpha" should appear before "zebra".
-	alpha := bytes.Index(out, []byte("alpha"))
-	zebra := bytes.Index(out, []byte("zebra"))
+	// After cycling to hostname-sort, "alpha" should appear before "zebra"
+	// in the latest frame. LastIndex skips earlier frames (initial render
+	// and the intermediate IP-sort frame) so the assertion targets the
+	// post-cycle hostname-sorted output.
+	alpha := bytes.LastIndex(out, []byte("alpha"))
+	zebra := bytes.LastIndex(out, []byte("zebra"))
 	if alpha < 0 || zebra < 0 || alpha >= zebra {
 		t.Errorf("alpha (%d) should appear before zebra (%d) under hostname sort:\n%s", alpha, zebra, out)
 	}

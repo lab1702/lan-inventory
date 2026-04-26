@@ -24,7 +24,8 @@ const (
 type sortKey int
 
 const (
-	sortByIP sortKey = iota
+	sortByMAC sortKey = iota // default — first listed so the zero value is MAC sort
+	sortByIP
 	sortByHostname
 	sortByVendor
 	sortByRTT
@@ -32,7 +33,7 @@ const (
 )
 
 func (k sortKey) String() string {
-	return [...]string{"ip", "hostname", "vendor", "rtt", "last_seen"}[k]
+	return [...]string{"mac", "ip", "hostname", "vendor", "rtt", "last_seen"}[k]
 }
 
 // Deps wires runtime dependencies into the TUI. Empty values are tolerated for
@@ -143,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.tab = tabEvents
 		case "s":
-			m.sortKey = (m.sortKey + 1) % 5
+			m.sortKey = (m.sortKey + 1) % 6
 		case "/":
 			m.filterMode = true
 			m.filterBuf = ""
@@ -217,7 +218,7 @@ func helpText() string {
 		{"1-4", "switch tabs (Devices / Services / Subnet / Events)"},
 		{"↑/↓ or k/j", "navigate selection"},
 		{"Enter", "(in filter mode) apply the filter"},
-		{"s", "cycle sort key (ip → hostname → vendor → rtt → last_seen)"},
+		{"s", "cycle sort key (mac → ip → hostname → vendor → rtt → last_seen)"},
 		{"/", "start filter (typing narrows the device list; Enter applies)"},
 		{"r", "force a rescan now"},
 		{"?", "toggle this help"},
