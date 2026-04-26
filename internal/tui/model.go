@@ -203,26 +203,35 @@ func (m Model) View() string {
 		b.WriteString(m.viewEvents())
 	}
 	if m.filterMode || m.filterBuf != "" {
-		b.WriteString(fmt.Sprintf("\n\n/filter: %s", m.filterBuf))
+		b.WriteString("\n\n")
+		b.WriteString(styleWarn.Render(fmt.Sprintf("/filter: %s", m.filterBuf)))
 	}
 	return b.String()
 }
 
 func helpText() string {
-	return strings.Join([]string{
-		"Help — lan-inventory",
+	rows := []struct {
+		key  string
+		desc string
+	}{
+		{"1-4", "switch tabs (Devices / Services / Subnet / Events)"},
+		{"↑/↓ or k/j", "navigate selection"},
+		{"Enter", "(in filter mode) apply the filter"},
+		{"s", "cycle sort key (ip → hostname → vendor → rtt → last_seen)"},
+		{"/", "start filter (typing narrows the device list; Enter applies)"},
+		{"r", "force a rescan now"},
+		{"?", "toggle this help"},
+		{"q / Esc", "quit"},
+	}
+	lines := []string{
+		styleBold.Render("Help — lan-inventory"),
 		"",
-		"  1-4         switch tabs (Devices / Services / Subnet / Events)",
-		"  ↑/↓ or k/j  navigate selection",
-		"  Enter       (in filter mode) apply the filter",
-		"  s           cycle sort key (ip → hostname → vendor → rtt → last_seen)",
-		"  /           start filter (typing narrows the device list; Enter applies)",
-		"  r           force a rescan now",
-		"  ?           toggle this help",
-		"  q / Esc     quit",
-		"",
-		"Press any key to dismiss.",
-	}, "\n")
+	}
+	for _, r := range rows {
+		lines = append(lines, fmt.Sprintf("  %s  %s", padRight(styleAccent.Render(r.key), 12), r.desc))
+	}
+	lines = append(lines, "", styleDim.Render("Press any key to dismiss."))
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderHeader() string {
