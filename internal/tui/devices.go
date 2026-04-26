@@ -22,28 +22,51 @@ func (m Model) viewDevices() string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Sort: %s   ", m.sortKey))
 	b.WriteString(fmt.Sprintf("Selection: %d/%d\n\n", m.selectedRow+1, len(devices)))
-	header := fmt.Sprintf("%-15s  %-17s  %-12s  %-22s  %-12s  %-22s  %-8s  %s",
-		"IP", "MAC", "Vendor", "Hostname", "OS", "Ports", "RTT", "Status")
+
+	// Column widths chosen to match the previous fmt.Sprintf("%-15s  %-17s ...") layout.
+	const (
+		wIP     = 15
+		wMAC    = 17
+		wVendor = 12
+		wHost   = 22
+		wOS     = 12
+		wPorts  = 22
+		wRTT    = 8
+	)
+	headerCells := []string{
+		padRight("IP", wIP),
+		padRight("MAC", wMAC),
+		padRight("Vendor", wVendor),
+		padRight("Hostname", wHost),
+		padRight("OS", wOS),
+		padRight("Ports", wPorts),
+		padRight("RTT", wRTT),
+		"Status",
+	}
+	header := strings.Join(headerCells, "  ")
 	b.WriteString(header)
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("-", len(header)))
+	b.WriteString(strings.Repeat("-", visibleLen(header)))
 	b.WriteString("\n")
+
 	for i, d := range devices {
 		marker := "  "
 		if i == m.selectedRow {
 			marker = "> "
 		}
+		row := strings.Join([]string{
+			padRight(firstIP(d), wIP),
+			padRight(d.MAC, wMAC),
+			padRight(truncate(d.Vendor, 12), wVendor),
+			padRight(truncate(d.Hostname, 22), wHost),
+			padRight(truncate(d.OSGuess, 12), wOS),
+			padRight(truncate(portsCSV(d.OpenPorts), 22), wPorts),
+			padRight(rttString(d.RTT), wRTT),
+			d.Status.String(),
+		}, "  ")
 		b.WriteString(marker)
-		b.WriteString(fmt.Sprintf("%-15s  %-17s  %-12s  %-22s  %-12s  %-22s  %-8s  %s\n",
-			firstIP(d),
-			d.MAC,
-			truncate(d.Vendor, 12),
-			truncate(d.Hostname, 22),
-			truncate(d.OSGuess, 12),
-			truncate(portsCSV(d.OpenPorts), 22),
-			rttString(d.RTT),
-			d.Status,
-		))
+		b.WriteString(row)
+		b.WriteString("\n")
 	}
 	if len(devices) > 0 {
 		b.WriteString("\n")
