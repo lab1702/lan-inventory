@@ -59,6 +59,7 @@ func (s *Scanner) Run(ctx context.Context) error {
 	active := &ActiveWorker{
 		Subnet:      s.cfg.Iface.Subnet,
 		HostIPs:     hosts,
+		Gateway:     s.cfg.Iface.Gateway,
 		WorkerCount: 32,
 	}
 	s.active.Store(active)
