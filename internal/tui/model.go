@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package tui implements the Bubble Tea TUI: a 4-tab dashboard over the
 // scanner's live device map.
 package tui

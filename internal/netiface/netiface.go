@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package netiface auto-detects the default network interface and its IPv4
 // subnet, and provides helpers for iterating the subnet.
 package netiface

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package probe contains stateless probing functions: ping, port scan, OS
 // guess by TTL, and reverse DNS lookup.
 package probe
