@@ -45,9 +45,11 @@ lan-inventory --version
 ### TUI keys
 
 - `1`–`4` switch tabs (Devices / Services / Subnet / Events)
-- `↑/↓` navigate
-- `Enter` drill into a device
-- `q` or `Esc` quit
+- `↑/↓` or `j/k` navigate
+- `s` cycle sort key
+- `/` filter (Enter applies, Esc cancels)
+- `r` force a rescan
+- `q`, `Esc`, or `Ctrl+C` quit
 - `?` help overlay
 
 ### Exit codes (non-interactive)

@@ -62,7 +62,7 @@ func runOnce(iface *netiface.Info, asTable bool) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	scn := scanner.New(scanner.Config{Iface: iface, OnceMode: true})
+	scn := scanner.New(scanner.Config{Iface: iface})
 	doneEvents := make(chan struct{})
 	go func() {
 		for range scn.Events() {

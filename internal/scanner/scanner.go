@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lab1702/lan-inventory/internal/model"
 	"github.com/lab1702/lan-inventory/internal/netiface"
@@ -12,7 +13,6 @@ import (
 type Config struct {
 	Iface         *netiface.Info
 	MergerOptions MergerOptions
-	OnceMode      bool // if true, ActiveWorker runs a single sweep then context is cancelled by the caller
 }
 
 // Scanner wires the three workers and the merger together.
@@ -21,7 +21,7 @@ type Scanner struct {
 	merger  *Merger
 	events  chan model.DeviceEvent
 	updates chan Update
-	active  *ActiveWorker
+	active  atomic.Pointer[ActiveWorker]
 }
 
 // New builds a fresh Scanner. Call Run to start it.
@@ -37,10 +37,11 @@ func New(cfg Config) *Scanner {
 // TriggerSweep runs a single out-of-band active sweep using the same worker
 // pool as the periodic scan. Safe to call concurrently with Run.
 func (s *Scanner) TriggerSweep(ctx context.Context) {
-	if s.active == nil {
+	a := s.active.Load()
+	if a == nil {
 		return
 	}
-	s.active.SweepOnce(ctx, s.updates)
+	a.SweepOnce(ctx, s.updates)
 }
 
 // Events returns a read-only channel of DeviceEvent.
@@ -55,12 +56,12 @@ func (s *Scanner) Run(ctx context.Context) error {
 
 	arp := &ARPWorker{IfaceName: s.cfg.Iface.Name}
 	mdns := &MDNSWorker{IfaceName: s.cfg.Iface.Name}
-	s.active = &ActiveWorker{
+	active := &ActiveWorker{
 		Subnet:      s.cfg.Iface.Subnet,
 		HostIPs:     hosts,
 		WorkerCount: 32,
 	}
-	active := s.active
+	s.active.Store(active)
 
 	var wg sync.WaitGroup
 

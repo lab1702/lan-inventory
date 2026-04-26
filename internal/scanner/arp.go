@@ -51,7 +51,7 @@ func (w *ARPWorker) Run(ctx context.Context, out chan<- Update) error {
 				continue
 			}
 			mac := net.HardwareAddr(arp.SourceHwAddress).String()
-			ip := net.IP(arp.SourceProtAddress)
+			ip := append(net.IP{}, arp.SourceProtAddress...)
 			if mac == "" || ip == nil || ip.IsUnspecified() {
 				continue
 			}

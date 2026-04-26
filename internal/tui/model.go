@@ -215,7 +215,7 @@ func helpText() string {
 		"",
 		"  1-4         switch tabs (Devices / Services / Subnet / Events)",
 		"  ↑/↓ or k/j  navigate selection",
-		"  Enter       drill into selected device",
+		"  Enter       (in filter mode) apply the filter",
 		"  s           cycle sort key (ip → hostname → vendor → rtt → last_seen)",
 		"  /           start filter (typing narrows the device list; Enter applies)",
 		"  r           force a rescan now",
