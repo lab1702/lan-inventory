@@ -114,7 +114,7 @@ func isPrinter(v string) bool {
 func isIoT(v string) bool {
 	for _, needle := range []string{
 		"espressif", "tuya", "shelly", "wyzelabs", "wyze", "sonos",
-		"nest", "amazon", "google",
+		"nest", "amazon", "google", "roku", "samsung",
 	} {
 		if strings.Contains(v, needle) {
 			return true
@@ -179,7 +179,13 @@ func OSDetect(d *model.Device, nbnsResponded bool) string {
 	if hasService(d.Services, "_workstation._tcp") && fam != "Apple" {
 		return "Linux"
 	}
-	// Rules 14-16: TTL-only fallbacks.
+	// Rule 14: open printer ports (jetdirect 9100 / IPP 631) — catches
+	// printers without an OUI vendor match (e.g., when ARP hasn't filed
+	// the device yet, so vendor is empty and family rules can't fire).
+	if hasOpenPort(d.OpenPorts, 9100) || hasOpenPort(d.OpenPorts, 631) {
+		return "Network"
+	}
+	// Rules 15-17: TTL-only fallbacks.
 	switch ttlGuess {
 	case "RTOS/Network":
 		return "Network"
