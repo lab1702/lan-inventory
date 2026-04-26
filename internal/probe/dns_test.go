@@ -31,3 +31,11 @@ func TestReverseDNSUnreachable(t *testing.T) {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
+
+func TestReverseDNSMDNSLocalhost(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	// Localhost rarely runs an mDNS responder bound to 127.0.0.1, so we
+	// typically expect "". We verify the function doesn't panic or hang.
+	_ = probe.ReverseDNSMDNS(ctx, "127.0.0.1")
+}
