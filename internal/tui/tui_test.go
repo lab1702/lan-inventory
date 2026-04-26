@@ -3,12 +3,14 @@ package tui_test
 import (
 	"bytes"
 	"io"
+	"net"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 
+	"github.com/lab1702/lan-inventory/internal/model"
 	"github.com/lab1702/lan-inventory/internal/tui"
 )
 
@@ -42,4 +44,37 @@ func readUntilStable(t *testing.T, tm *teatest.TestModel, wait time.Duration) []
 		t.Fatalf("readUntilStable: %v", err)
 	}
 	return out
+}
+
+func TestDevicesTabRendersRows(t *testing.T) {
+	devices := []*model.Device{
+		{
+			MAC:      "aa:bb:cc:dd:ee:01",
+			IPs:      []net.IP{net.ParseIP("192.168.1.10")},
+			Hostname: "macbook.local",
+			Vendor:   "Apple",
+			OSGuess:  "Linux/macOS",
+			Status:   model.StatusOnline,
+			RTT:      time.Millisecond,
+		},
+	}
+	deps := tui.Deps{
+		Subnet:   "192.168.1.0/24",
+		Iface:    "eth0",
+		Snapshot: func() []*model.Device { return devices },
+	}
+	mod := tui.NewModel(deps)
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	time.Sleep(1500 * time.Millisecond) // give Tick a chance to run Snapshot
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	for _, want := range []string{"macbook.local", "192.168.1.10", "Apple"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Errorf("expected %q in Devices tab:\n%s", want, out)
+		}
+	}
 }
