@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package model holds the pure data types used across the scanner, snapshot
 // writer, and TUI. No methods that perform I/O.
 package model

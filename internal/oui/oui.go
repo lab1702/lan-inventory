@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package oui resolves a MAC address to a vendor short-name using an
 // embedded copy of Wireshark's manuf database.
 //

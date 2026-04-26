@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Package snapshot renders the scanner's current device map as JSON or as a
 // human-readable text table for the --once mode.
 package snapshot

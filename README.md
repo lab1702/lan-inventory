@@ -82,3 +82,11 @@ The OUI vendor database (`internal/oui/manuf.txt`) is sourced from Wireshark
 and committed to the repo. Run `make manuf-refresh` to update it; it pulls
 from `wireshark.org`, filters to 24-bit OUI entries, and rewrites the file.
 Review the diff and commit if it looks right.
+
+## License
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).
+
+The bundled OUI vendor database is sourced from Wireshark, which is also
+licensed under GPL-2.0-or-later; the upstream license text is preserved at
+[internal/oui/MANUF-LICENSE](internal/oui/MANUF-LICENSE).
