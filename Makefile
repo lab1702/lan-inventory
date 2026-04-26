@@ -1,4 +1,4 @@
-.PHONY: build test lint vet smoke clean
+.PHONY: build test lint vet smoke clean manuf-refresh
 
 build:
 	go build -o bin/lan-inventory ./cmd/lan-inventory
@@ -18,3 +18,12 @@ smoke: build
 
 clean:
 	rm -rf bin/
+
+manuf-refresh:
+	@echo "Fetching Wireshark manuf database..."
+	@curl -sSfL https://www.wireshark.org/download/automated/data/manuf -o /tmp/manuf.raw
+	@echo "Filtering to 24-bit OUI entries..."
+	@grep -v '^#' /tmp/manuf.raw | grep -v '^$$' | grep -v '/' > internal/oui/manuf.txt
+	@rm -f /tmp/manuf.raw
+	@wc -l internal/oui/manuf.txt
+	@echo "Done. Review the diff and commit if it looks right."

@@ -1,5 +1,10 @@
 // Package oui resolves a MAC address to a vendor short-name using an
-// embedded copy of Wireshark's manuf database (or a trimmed equivalent).
+// embedded copy of Wireshark's manuf database.
+//
+// The bundled manuf.txt and its license (MANUF-LICENSE) are fetched from
+// https://www.wireshark.org/download/automated/data/manuf and
+// https://gitlab.com/wireshark/wireshark/-/raw/master/COPYING respectively,
+// via `make manuf-refresh`.
 package oui
 
 import (
@@ -30,6 +35,9 @@ func loadTable() {
 			continue
 		}
 		prefix := strings.ToUpper(strings.TrimSpace(parts[0]))
+		if strings.Contains(prefix, "/") {
+			continue
+		}
 		short := strings.TrimSpace(parts[1])
 		if prefix == "" || short == "" {
 			continue
