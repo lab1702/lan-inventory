@@ -78,3 +78,32 @@ func TestDevicesTabRendersRows(t *testing.T) {
 		}
 	}
 }
+
+func TestServicesTabGroupsByType(t *testing.T) {
+	devices := []*model.Device{
+		{
+			MAC: "aa:01", IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "host-a",
+			Services: []model.ServiceInst{{Type: "_http._tcp", Name: "alpha", Port: 80}},
+		},
+		{
+			MAC: "aa:02", IPs: []net.IP{net.ParseIP("192.168.1.20")}, Hostname: "host-b",
+			Services: []model.ServiceInst{{Type: "_http._tcp", Name: "beta", Port: 80}},
+		},
+	}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Contains(out, []byte("_http._tcp")) {
+		t.Errorf("expected _http._tcp grouping:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte("2 instances")) {
+		t.Errorf("expected count summary:\n%s", out)
+	}
+}
