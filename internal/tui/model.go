@@ -25,15 +25,15 @@ const (
 type sortKey int
 
 const (
-	sortByHostname sortKey = iota
-	sortByIP
+	sortByIP sortKey = iota
+	sortByHostname
 	sortByVendor
 	sortByRTT
 	sortByLastSeen
 )
 
 func (k sortKey) String() string {
-	return [...]string{"hostname", "ip", "vendor", "rtt", "last_seen"}[k]
+	return [...]string{"ip", "hostname", "vendor", "rtt", "last_seen"}[k]
 }
 
 // Deps wires runtime dependencies into the TUI. Empty values are tolerated for
@@ -113,6 +113,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.filterMode {
 			switch msg.Type {
+			case tea.KeyCtrlC:
+				m.quitting = true
+				return m, tea.Quit
 			case tea.KeyEnter, tea.KeyEsc:
 				m.filterMode = false
 			case tea.KeyBackspace:

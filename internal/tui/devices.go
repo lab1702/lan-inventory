@@ -86,15 +86,16 @@ func sortDevices(devs []*model.Device, key sortKey) {
 		switch key {
 		case sortByIP:
 			return firstIP(devs[i]) < firstIP(devs[j])
+		case sortByHostname:
+			return devs[i].Hostname < devs[j].Hostname
 		case sortByVendor:
 			return devs[i].Vendor < devs[j].Vendor
 		case sortByRTT:
 			return devs[i].RTT < devs[j].RTT
 		case sortByLastSeen:
 			return devs[i].LastSeen.After(devs[j].LastSeen)
-		default: // sortByHostname
-			return devs[i].Hostname < devs[j].Hostname
 		}
+		return false
 	})
 }
 

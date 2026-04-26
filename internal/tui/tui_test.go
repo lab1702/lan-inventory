@@ -168,6 +168,9 @@ func TestSortCycleByKey(t *testing.T) {
 	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
 	time.Sleep(1500 * time.Millisecond) // initial render with default sort (IP)
+	// Drain accumulated output so the subsequent read only captures the post-sort frame.
+	_, _ = io.ReadAll(tm.Output())
+
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // cycle to Hostname
 	time.Sleep(500 * time.Millisecond)
 	out, err := io.ReadAll(tm.Output())
