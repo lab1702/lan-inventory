@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lab1702/lan-inventory/internal/model"
 )
@@ -232,7 +231,9 @@ func (m Model) renderHeader() string {
 	for i, name := range tabs {
 		label := fmt.Sprintf("[%d] %s", i+1, name)
 		if int(m.tab) == i {
-			label = lipgloss.NewStyle().Bold(true).Underline(true).Render(label)
+			label = styleTabActive.Render(label)
+		} else {
+			label = styleTabInactive.Render(label)
 		}
 		rendered[i] = label
 	}
@@ -252,6 +253,12 @@ func (m Model) summaryLine() string {
 			offline++
 		}
 	}
-	return fmt.Sprintf("Online: %d   Stale: %d   Offline: %d   Subnet: %s   Iface: %s",
-		online, stale, offline, m.deps.Subnet, m.deps.Iface)
+	parts := []string{
+		styleOK.Render(fmt.Sprintf("Online: %d", online)),
+		styleWarn.Render(fmt.Sprintf("Stale: %d", stale)),
+		styleErr.Render(fmt.Sprintf("Offline: %d", offline)),
+		fmt.Sprintf("Subnet: %s", m.deps.Subnet),
+		fmt.Sprintf("Iface: %s", m.deps.Iface),
+	}
+	return strings.Join(parts, "   ")
 }
