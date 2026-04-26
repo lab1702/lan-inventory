@@ -28,7 +28,8 @@ func (m Model) viewServices() string {
 			instLabel = "instances"
 		}
 		hostList := strings.Join(hosts, ", ")
-		b.WriteString(fmt.Sprintf("%-22s  %d %s  →  %s\n", k, count, instLabel, hostList))
+		key := padRight(styleAccent.Render(k), 22)
+		b.WriteString(fmt.Sprintf("%s  %d %s  →  %s\n", key, count, instLabel, hostList))
 	}
 	return b.String()
 }
