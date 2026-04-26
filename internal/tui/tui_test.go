@@ -130,3 +130,30 @@ func TestSubnetTabRendersGrid(t *testing.T) {
 		t.Errorf("expected subnet grid glyphs:\n%s", out)
 	}
 }
+
+func TestEventsTabShowsRingBuffer(t *testing.T) {
+	ch := make(chan model.DeviceEvent, 4)
+	dev := &model.Device{MAC: "aa:bb:cc:dd:ee:99", IPs: []net.IP{net.ParseIP("192.168.1.99")}}
+	ch <- model.DeviceEvent{Type: model.EventJoined, Device: dev}
+
+	mod := tui.NewModel(tui.Deps{
+		Subnet: "192.168.1.0/24", Iface: "eth0",
+		Snapshot: func() []*model.Device { return nil },
+		Events:   func() <-chan model.DeviceEvent { return ch },
+	})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Contains(out, []byte("aa:bb:cc:dd:ee:99")) {
+		t.Errorf("expected event row in Events tab:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte("joined")) {
+		t.Errorf("expected joined label:\n%s", out)
+	}
+}
