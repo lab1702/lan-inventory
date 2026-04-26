@@ -71,8 +71,14 @@ lan-inventory --version
 ## Development
 
 ```bash
-make test     # run all unit tests
-make vet      # go vet
-make lint     # staticcheck
-make smoke    # build, setcap, and run --once --table on your live network
+make test            # run all unit tests
+make vet             # go vet
+make lint            # staticcheck
+make smoke           # build, setcap, and run --once --table on your live network
+make manuf-refresh   # refresh the OUI vendor database from Wireshark upstream
 ```
+
+The OUI vendor database (`internal/oui/manuf.txt`) is sourced from Wireshark
+and committed to the repo. Run `make manuf-refresh` to update it; it pulls
+from `wireshark.org`, filters to 24-bit OUI entries, and rewrites the file.
+Review the diff and commit if it looks right.
