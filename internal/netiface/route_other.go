@@ -7,6 +7,6 @@ import (
 	"net"
 )
 
-func defaultRouteInterface() (*net.Interface, error) {
-	return nil, fmt.Errorf("default route detection not implemented on this platform")
+func defaultRouteInterface() (*net.Interface, net.IP, error) {
+	return nil, nil, fmt.Errorf("default route detection not implemented on this platform")
 }

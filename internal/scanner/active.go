@@ -10,11 +10,12 @@ import (
 )
 
 // ActiveWorker periodically probes every host in Subnet plus any IP it has
-// learned about, calling probe.Ping, probe.ScanPorts, and probe.ReverseDNS.
+// learned about, calling probe.Ping, probe.ScanPorts, and probe.ResolveHostname.
 // One full sweep emits one Update per responding host.
 type ActiveWorker struct {
 	Subnet      *net.IPNet
 	HostIPs     []net.IP // pre-enumerated subnet hosts
+	Gateway     net.IP   // default-route gateway IP for the gateway-resolver hostname probe
 	Interval    time.Duration
 	WorkerCount int
 }
@@ -89,7 +90,7 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Updat
 		Alive:     true,
 		RTT:       pingRes.RTT,
 		OSGuess:   probe.OSGuess(pingRes.TTL),
-		Hostname:  probe.ReverseDNS(ctx, ip.String()),
+		Hostname:  probe.ResolveHostname(ctx, ip.String(), w.Gateway),
 		OpenPorts: probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
 	}
 	select {
