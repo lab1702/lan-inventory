@@ -42,7 +42,8 @@ func (m Model) viewSubnet() string {
 
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Subnet %s — %d hosts\n", m.deps.Subnet, 1<<hostBits))
-	b.WriteString("Legend: ● online · stale x offline _ unseen\n\n")
+	b.WriteString(styleDim.Render("Legend: ● online · stale x offline _ unseen"))
+	b.WriteString("\n\n")
 
 	base := subnet.IP.Mask(subnet.Mask).To4()
 	for row := 0; row < gridOther; row++ {
@@ -56,18 +57,21 @@ func (m Model) viewSubnet() string {
 				ip[i] = byte(sum & 0xff)
 				carry = sum >> 8
 			}
-			glyph := "_"
-			switch statusByLast[ip.String()] {
-			case model.StatusOnline:
-				glyph = "●"
-			case model.StatusStale:
-				glyph = "·"
-			case model.StatusOffline:
-				glyph = "x"
-			}
-			b.WriteString(glyph)
+			b.WriteString(coloredGlyph(statusByLast[ip.String()]))
 		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func coloredGlyph(s model.Status) string {
+	switch s {
+	case model.StatusOnline:
+		return styleOK.Render("●")
+	case model.StatusStale:
+		return styleWarn.Render("·")
+	case model.StatusOffline:
+		return styleErr.Render("x")
+	}
+	return styleDim.Render("_")
 }

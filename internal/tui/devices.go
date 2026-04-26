@@ -20,30 +20,55 @@ func (m Model) viewDevices() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Sort: %s   ", m.sortKey))
-	b.WriteString(fmt.Sprintf("Selection: %d/%d\n\n", m.selectedRow+1, len(devices)))
-	header := fmt.Sprintf("%-15s  %-17s  %-12s  %-22s  %-12s  %-22s  %-8s  %s",
-		"IP", "MAC", "Vendor", "Hostname", "OS", "Ports", "RTT", "Status")
+	b.WriteString(styleDim.Render(fmt.Sprintf("Sort: %s   Selection: %d/%d", m.sortKey, m.selectedRow+1, len(devices))))
+	b.WriteString("\n\n")
+
+	const (
+		wIP     = 15
+		wMAC    = 17
+		wVendor = 12
+		wHost   = 22
+		wOS     = 12
+		wPorts  = 22
+		wRTT    = 8
+	)
+	headerCells := []string{
+		padRight(styleHeaderRow.Render("IP"), wIP),
+		padRight(styleHeaderRow.Render("MAC"), wMAC),
+		padRight(styleHeaderRow.Render("Vendor"), wVendor),
+		padRight(styleHeaderRow.Render("Hostname"), wHost),
+		padRight(styleHeaderRow.Render("OS"), wOS),
+		padRight(styleHeaderRow.Render("Ports"), wPorts),
+		padRight(styleHeaderRow.Render("RTT"), wRTT),
+		styleHeaderRow.Render("Status"),
+	}
+	header := strings.Join(headerCells, "  ")
 	b.WriteString(header)
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("-", len(header)))
+	b.WriteString(styleDim.Render(strings.Repeat("-", visibleLen(header))))
 	b.WriteString("\n")
+
 	for i, d := range devices {
 		marker := "  "
 		if i == m.selectedRow {
 			marker = "> "
 		}
-		b.WriteString(marker)
-		b.WriteString(fmt.Sprintf("%-15s  %-17s  %-12s  %-22s  %-12s  %-22s  %-8s  %s\n",
-			firstIP(d),
-			d.MAC,
-			truncate(d.Vendor, 12),
-			truncate(d.Hostname, 22),
-			truncate(d.OSGuess, 12),
-			truncate(portsCSV(d.OpenPorts), 22),
-			rttString(d.RTT),
-			d.Status,
-		))
+		row := strings.Join([]string{
+			padRight(firstIP(d), wIP),
+			padRight(d.MAC, wMAC),
+			padRight(dimIfEmpty(truncate(d.Vendor, 12)), wVendor),
+			padRight(dimIfEmpty(truncate(d.Hostname, 22)), wHost),
+			padRight(dimIfEmpty(truncate(d.OSGuess, 12)), wOS),
+			padRight(dimIfEmpty(truncate(portsCSV(d.OpenPorts), 22)), wPorts),
+			padRight(rttString(d.RTT), wRTT),
+			styleStatus(d.Status).Render(d.Status.String()),
+		}, "  ")
+		line := marker + row
+		if i == m.selectedRow {
+			line = styleSelectedRow.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
 	}
 	if len(devices) > 0 {
 		b.WriteString("\n")
@@ -101,10 +126,11 @@ func sortDevices(devs []*model.Device, key sortKey) {
 
 func detailStrip(d *model.Device) string {
 	var b strings.Builder
-	b.WriteString("─── selected ─────────────────────────\n")
-	b.WriteString(fmt.Sprintf("MAC:      %s\n", d.MAC))
-	b.WriteString(fmt.Sprintf("Vendor:   %s\n", d.Vendor))
-	b.WriteString(fmt.Sprintf("OS guess: %s\n", d.OSGuess))
+	b.WriteString(styleDim.Render("─── selected ─────────────────────────"))
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("MAC:     "), d.MAC))
+	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("Vendor:  "), d.Vendor))
+	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("OS guess:"), d.OSGuess))
 	if len(d.OpenPorts) > 0 {
 		ports := make([]string, 0, len(d.OpenPorts))
 		for _, p := range d.OpenPorts {
@@ -114,23 +140,24 @@ func detailStrip(d *model.Device) string {
 			}
 			ports = append(ports, label)
 		}
-		b.WriteString("Ports:    " + strings.Join(ports, ", ") + "\n")
+		b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("Ports:   "), strings.Join(ports, ", ")))
 	}
 	if len(d.Services) > 0 {
 		svcs := make([]string, 0, len(d.Services))
 		for _, s := range d.Services {
 			svcs = append(svcs, fmt.Sprintf("%s %q :%d", s.Type, s.Name, s.Port))
 		}
-		b.WriteString("Services: " + strings.Join(svcs, "; ") + "\n")
+		b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("Services:"), strings.Join(svcs, "; ")))
 	}
-	b.WriteString(fmt.Sprintf("First/Last seen: %s / %s\n",
+	b.WriteString(fmt.Sprintf("%s %s / %s\n",
+		styleAccent.Render("First/Last seen:"),
 		d.FirstSeen.Format(time.RFC3339), d.LastSeen.Format(time.RFC3339)))
 	if len(d.RTTHistory) > 0 {
 		samples := make([]string, 0, len(d.RTTHistory))
 		for _, r := range d.RTTHistory {
 			samples = append(samples, rttString(r))
 		}
-		b.WriteString("RTT history: " + strings.Join(samples, " ") + "\n")
+		b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("RTT history:"), strings.Join(samples, " ")))
 	}
 	return b.String()
 }
@@ -165,4 +192,13 @@ func truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-1] + "…"
+}
+
+// dimIfEmpty returns styleDim-rendered s when s is empty, "—", or "--".
+// Otherwise returns s unchanged.
+func dimIfEmpty(s string) string {
+	if s == "" || s == "—" || s == "--" {
+		return styleDim.Render(s)
+	}
+	return s
 }

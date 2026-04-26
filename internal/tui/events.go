@@ -15,9 +15,11 @@ func (m Model) viewEvents() string {
 		if e.IP != nil {
 			ip = e.IP.String()
 		}
-		b.WriteString(fmt.Sprintf("%s  %-7s  %-18s  %s\n",
-			e.Time.Format("15:04:05"),
-			e.Type,
+		t := styleDim.Render(e.Time.Format("15:04:05"))
+		typeStr := padRight(styleEventType(e.Type).Render(e.Type.String()), 7)
+		b.WriteString(fmt.Sprintf("%s  %s  %-18s  %s\n",
+			t,
+			typeStr,
 			e.MAC,
 			ip,
 		))

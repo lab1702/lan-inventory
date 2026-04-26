@@ -8,7 +8,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/muesli/termenv"
 
 	"github.com/lab1702/lan-inventory/internal/model"
 	"github.com/lab1702/lan-inventory/internal/tui"
@@ -129,6 +131,11 @@ func TestSubnetTabRendersGrid(t *testing.T) {
 	if !bytes.Contains(out, []byte("●")) && !bytes.Contains(out, []byte("·")) {
 		t.Errorf("expected subnet grid glyphs:\n%s", out)
 	}
+
+	// Confirm the online glyph carries an ANSI escape (color is being applied).
+	if bytes.Contains(out, []byte("●")) && !bytes.Contains(out, []byte("\x1b[")) {
+		t.Errorf("expected ANSI escapes around colored glyphs:\n%s", out)
+	}
 }
 
 func TestEventsTabShowsRingBuffer(t *testing.T) {
@@ -232,5 +239,69 @@ func TestHelpOverlay(t *testing.T) {
 		if !bytes.Contains(out, []byte(want)) {
 			t.Errorf("expected %q in help overlay:\n%s", want, out)
 		}
+	}
+}
+
+func TestStatusColors(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	defer lipgloss.SetColorProfile(prev)
+
+	devices := []*model.Device{
+		{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "online-host", Status: model.StatusOnline},
+		{IPs: []net.IP{net.ParseIP("192.168.1.20")}, Hostname: "stale-host", Status: model.StatusStale},
+		{IPs: []net.IP{net.ParseIP("192.168.1.30")}, Hostname: "offline-host", Status: model.StatusOffline},
+	}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+
+	count := bytes.Count(out, []byte("\x1b["))
+	if count < 3 {
+		t.Errorf("expected >=3 ANSI escape sequences in colored output, got %d:\n%s", count, out)
+	}
+}
+
+func TestColorsCanBeDisabled(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	defer lipgloss.SetColorProfile(prev)
+
+	devices := []*model.Device{
+		{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "host", Status: model.StatusOnline},
+	}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+
+	// SGR color sequences end in 'm' (e.g. "\x1b[32m" for green).
+	// Terminal-control sequences (cursor movement, erase, etc.) are still
+	// present; we only reject color/style SGR codes.
+	if bytes.Contains(out, []byte("\x1b[m")) || bytes.Contains(out, []byte("\x1b[0m")) {
+		t.Errorf("expected no SGR color sequences when ColorProfile=Ascii, got:\n%s", out)
+	}
+	// A quick check: no foreground color codes (ESC [ 3 <digit> m).
+	for _, code := range [][]byte{
+		[]byte("\x1b[30m"), []byte("\x1b[31m"), []byte("\x1b[32m"), []byte("\x1b[33m"),
+		[]byte("\x1b[34m"), []byte("\x1b[35m"), []byte("\x1b[36m"), []byte("\x1b[37m"),
+	} {
+		if bytes.Contains(out, code) {
+			t.Errorf("expected no foreground color codes when ColorProfile=Ascii, found %q:\n%s", code, out)
+		}
+	}
+	if !bytes.Contains(out, []byte("host")) {
+		t.Errorf("expected hostname in output even without color:\n%s", out)
 	}
 }
