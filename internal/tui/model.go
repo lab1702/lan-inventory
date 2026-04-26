@@ -22,6 +22,20 @@ const (
 	tabEvents
 )
 
+type sortKey int
+
+const (
+	sortByHostname sortKey = iota
+	sortByIP
+	sortByVendor
+	sortByRTT
+	sortByLastSeen
+)
+
+func (k sortKey) String() string {
+	return [...]string{"hostname", "ip", "vendor", "rtt", "last_seen"}[k]
+}
+
 // Deps wires runtime dependencies into the TUI. Empty values are tolerated for
 // tests; production callers should supply Snapshot/Events.
 type Deps struct {
@@ -29,24 +43,32 @@ type Deps struct {
 	Iface    string
 	Snapshot func() []*model.Device                // returns a fresh slice each call
 	Events   func() <-chan model.DeviceEvent       // single-consumer channel of new events
+	OnRescan func()                                // optional: called when user presses 'r'
 }
 
 // Model is the root Bubble Tea model.
 type Model struct {
 	deps Deps
 
-	tab     tab
-	devices []*model.Device
-	events  []model.Event
+	tab      tab
+	devices  []*model.Device
+	events   []model.Event
 
 	width  int
 	height int
 
-	// pollInterval controls how often the TUI re-snapshots the scanner.
 	pollInterval time.Duration
+	quitting     bool
 
-	// for tests: explicitly track quit
-	quitting bool
+	// Devices-tab interaction state
+	sortKey      sortKey
+	filterBuf    string // current filter text
+	filterMode   bool   // true while typing filter
+	selectedRow  int    // selected device index after sort+filter
+	rescanNonce  int    // bumped by 'r' to signal scanner (consumed via Deps.OnRescan)
+
+	// help overlay
+	showHelp bool
 }
 
 func NewModel(deps Deps) Model {
@@ -89,6 +111,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
+		if m.filterMode {
+			switch msg.Type {
+			case tea.KeyEnter, tea.KeyEsc:
+				m.filterMode = false
+			case tea.KeyBackspace:
+				if n := len(m.filterBuf); n > 0 {
+					m.filterBuf = m.filterBuf[:n-1]
+				}
+			case tea.KeyRunes:
+				m.filterBuf += string(msg.Runes)
+			}
+			return m, nil
+		}
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
 			m.quitting = true
@@ -101,6 +140,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tab = tabSubnet
 		case "4":
 			m.tab = tabEvents
+		case "s":
+			m.sortKey = (m.sortKey + 1) % 5
+		case "/":
+			m.filterMode = true
+			m.filterBuf = ""
+		case "r":
+			m.rescanNonce++
+			if m.deps.OnRescan != nil {
+				m.deps.OnRescan()
+			}
+		case "?":
+			m.showHelp = true
+		case "up", "k":
+			if m.selectedRow > 0 {
+				m.selectedRow--
+			}
+		case "down", "j":
+			m.selectedRow++
 		}
 	case tickMsg:
 		if m.deps.Snapshot != nil {
@@ -127,6 +184,9 @@ func (m Model) View() string {
 	if m.quitting {
 		return ""
 	}
+	if m.showHelp {
+		return helpText()
+	}
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
 	b.WriteString("\n\n")
@@ -140,7 +200,27 @@ func (m Model) View() string {
 	case tabEvents:
 		b.WriteString(m.viewEvents())
 	}
+	if m.filterMode || m.filterBuf != "" {
+		b.WriteString(fmt.Sprintf("\n\n/filter: %s", m.filterBuf))
+	}
 	return b.String()
+}
+
+func helpText() string {
+	return strings.Join([]string{
+		"Help — lan-inventory",
+		"",
+		"  1-4         switch tabs (Devices / Services / Subnet / Events)",
+		"  ↑/↓ or k/j  navigate selection",
+		"  Enter       drill into selected device",
+		"  s           cycle sort key (ip → hostname → vendor → rtt → last_seen)",
+		"  /           start filter (typing narrows the device list; Enter applies)",
+		"  r           force a rescan now",
+		"  ?           toggle this help",
+		"  q / Esc     quit",
+		"",
+		"Press any key to dismiss.",
+	}, "\n")
 }
 
 func (m Model) renderHeader() string {

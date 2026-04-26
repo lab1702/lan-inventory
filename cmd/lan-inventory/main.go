@@ -124,6 +124,7 @@ func runTUI(iface *netiface.Info) int {
 		Iface:    iface.Name,
 		Snapshot: scn.Snapshot,
 		Events:   func() <-chan model.DeviceEvent { return scn.Events() },
+		OnRescan: func() { go scn.TriggerSweep(ctx) },
 	}
 	prog := tea.NewProgram(tui.NewModel(deps), tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {

@@ -157,3 +157,77 @@ func TestEventsTabShowsRingBuffer(t *testing.T) {
 		t.Errorf("expected joined label:\n%s", out)
 	}
 }
+
+func TestSortCycleByKey(t *testing.T) {
+	devices := []*model.Device{
+		{IPs: []net.IP{net.ParseIP("192.168.1.20")}, Hostname: "alpha"},
+		{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "zebra"},
+	}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	time.Sleep(1500 * time.Millisecond) // initial render with default sort (IP)
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // cycle to Hostname
+	time.Sleep(500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	// After cycling to hostname-sort, "alpha" should appear before "zebra".
+	alpha := bytes.Index(out, []byte("alpha"))
+	zebra := bytes.Index(out, []byte("zebra"))
+	if alpha < 0 || zebra < 0 || alpha >= zebra {
+		t.Errorf("alpha (%d) should appear before zebra (%d) under hostname sort:\n%s", alpha, zebra, out)
+	}
+}
+
+func TestFilterMode(t *testing.T) {
+	devices := []*model.Device{
+		{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "macbook"},
+		{IPs: []net.IP{net.ParseIP("192.168.1.20")}, Hostname: "printer"},
+	}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x03'}}) // Ctrl+C
+
+	time.Sleep(1500 * time.Millisecond)
+	// Drain accumulated output (includes pre-filter renders with both devices)
+	// so the subsequent read only captures the post-filter frame.
+	_, _ = io.ReadAll(tm.Output())
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	time.Sleep(500 * time.Millisecond)
+
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Contains(out, []byte("printer")) {
+		t.Errorf("expected printer to remain after filter:\n%s", out)
+	}
+	if bytes.Contains(out, []byte("macbook")) {
+		t.Errorf("expected macbook to be filtered out:\n%s", out)
+	}
+}
+
+func TestHelpOverlay(t *testing.T) {
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0"})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\x03'}})
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	time.Sleep(500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	for _, want := range []string{"Help", "1-4", "/", "s", "r", "Enter"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Errorf("expected %q in help overlay:\n%s", want, out)
+		}
+	}
+}
