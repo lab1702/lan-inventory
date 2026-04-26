@@ -10,9 +10,10 @@ import (
 
 // Info describes the interface chosen for scanning.
 type Info struct {
-	Name   string
-	Subnet *net.IPNet
-	HostIP net.IP // our own IP on this interface
+	Name    string
+	Subnet  *net.IPNet
+	HostIP  net.IP // our own IP on this interface
+	Gateway net.IP // default-route gateway IP; may be nil if unparseable
 }
 
 // MinPrefixOnesAllowed is the minimum prefix-ones count permitted — /22 (ones=22)
@@ -101,7 +102,7 @@ func incIP(ip net.IP) {
 // subnet size, and returns Info. This function reads OS state and is not
 // unit-tested; covered by manual smoke testing.
 func Detect() (*Info, error) {
-	defaultIface, err := defaultRouteInterface()
+	defaultIface, gateway, err := defaultRouteInterface()
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,6 @@ func Detect() (*Info, error) {
 		if ip4 == nil {
 			continue
 		}
-		// Build subnet from mask
 		ones, bits := ipnet.Mask.Size()
 		if bits != 32 {
 			continue
@@ -127,7 +127,7 @@ func Detect() (*Info, error) {
 		if err := CheckSubnetSize(subnet); err != nil {
 			return nil, err
 		}
-		return &Info{Name: defaultIface.Name, Subnet: subnet, HostIP: ip4}, nil
+		return &Info{Name: defaultIface.Name, Subnet: subnet, HostIP: ip4, Gateway: gateway}, nil
 	}
 	return nil, fmt.Errorf("no IPv4 address on interface %s", defaultIface.Name)
 }
