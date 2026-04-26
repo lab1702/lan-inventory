@@ -216,6 +216,12 @@ func mergeUpdate(dev *model.Device, u Update) {
 			dev.RTTHistory = dev.RTTHistory[len(dev.RTTHistory)-10:]
 		}
 	}
+	if u.TTL > 0 {
+		dev.TTL = u.TTL
+	}
+	if u.NBNSResponded {
+		dev.NBNSResponded = true
+	}
 	if u.Time.After(dev.LastSeen) {
 		dev.LastSeen = u.Time
 	}

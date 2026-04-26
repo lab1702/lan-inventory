@@ -79,19 +79,20 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, out chan<- Updat
 	}
 	pingRes, err := probe.Ping(ctx, ip.String())
 	if err != nil || !pingRes.Alive {
-		// No signal from this host this cycle — emit nothing. Status decay
-		// happens via the merger's age-based sweep.
 		return
 	}
+	nbnsName := probe.NBNS(ctx, ip.String())
 	update := Update{
-		Source:    "active",
-		Time:      time.Now(),
-		IP:        ip,
-		Alive:     true,
-		RTT:       pingRes.RTT,
-		OSGuess:   probe.OSGuess(pingRes.TTL),
-		Hostname:  probe.ResolveHostname(ctx, ip.String(), w.Gateway),
-		OpenPorts: probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
+		Source:        "active",
+		Time:          time.Now(),
+		IP:            ip,
+		Alive:         true,
+		RTT:           pingRes.RTT,
+		TTL:           pingRes.TTL,
+		OSGuess:       probe.OSGuess(pingRes.TTL),
+		Hostname:      probe.ResolveHostname(ctx, ip.String(), w.Gateway),
+		OpenPorts:     probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
+		NBNSResponded: nbnsName != "",
 	}
 	select {
 	case out <- update:
