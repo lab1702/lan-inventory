@@ -107,3 +107,26 @@ func TestServicesTabGroupsByType(t *testing.T) {
 		t.Errorf("expected count summary:\n%s", out)
 	}
 }
+
+func TestSubnetTabRendersGrid(t *testing.T) {
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device {
+		return []*model.Device{
+			{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Status: model.StatusOnline},
+			{IPs: []net.IP{net.ParseIP("192.168.1.20")}, Status: model.StatusStale},
+		}
+	}})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	// The grid should render some non-empty content with at least one
+	// online cell glyph.
+	if !bytes.Contains(out, []byte("●")) && !bytes.Contains(out, []byte("·")) {
+		t.Errorf("expected subnet grid glyphs:\n%s", out)
+	}
+}
