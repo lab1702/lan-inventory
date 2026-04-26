@@ -94,7 +94,14 @@ func TestParseNBNSResponseTooShort(t *testing.T) {
 }
 
 func TestParseNBNSResponseEmptyList(t *testing.T) {
+	// An NBNS response with NUM_NAMES=0 in a buffer that's still >= minLen.
+	// makeNBNSResponse(nil, nil, nil) only produces 63 bytes which trips the
+	// minLen guard rather than the numNames check; build a padded buffer to
+	// exercise the numNames==0 branch directly.
 	resp := makeNBNSResponse(nil, nil, nil)
+	for len(resp) < 81 {
+		resp = append(resp, 0x00)
+	}
 	got := parseNBNSResponse(resp)
 	if got != "" {
 		t.Errorf("empty-list response should yield empty, got %q", got)
