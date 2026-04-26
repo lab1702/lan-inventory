@@ -135,6 +135,8 @@ func matchesFilter(d *model.Device, q string) bool {
 func sortDevices(devs []*model.Device, key sortKey) {
 	sort.SliceStable(devs, func(i, j int) bool {
 		switch key {
+		case sortByMAC:
+			return devs[i].MAC < devs[j].MAC
 		case sortByIP:
 			return firstIP(devs[i]) < firstIP(devs[j])
 		case sortByHostname:
