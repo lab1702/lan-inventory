@@ -13,8 +13,8 @@ func TestLookupKnown(t *testing.T) {
 	}{
 		{"00:1b:63:aa:bb:cc", "Apple"},
 		{"00:1B:63:AA:BB:CC", "Apple"},
-		{"b8:27:eb:11:22:33", "RaspberryPi"},
-		{"d8:0f:99:99:99:99", "TP-Link"},
+		{"b8:27:eb:11:22:33", "RaspberryPiF"},
+		{"a4:c3:f0:11:22:33", "Intel"},
 	}
 	for _, c := range cases {
 		got := oui.Lookup(c.mac)
