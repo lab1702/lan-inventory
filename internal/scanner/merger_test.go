@@ -194,3 +194,35 @@ func TestMergerComputesOSDetect(t *testing.T) {
 		t.Errorf("OSGuess = %q, want macOS (TXT model should override TTL=128)", devices[0].OSGuess)
 	}
 }
+
+func TestMergerKnownIPs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan Update, 16)
+	out := make(chan model.DeviceEvent, 16)
+	m := NewMerger(MergerOptions{LeftAfter: time.Hour})
+	go m.Run(ctx, in, out)
+
+	// ARP brings two devices — both are MAC-keyed and should appear in KnownIPs.
+	in <- Update{Source: "arp", Time: time.Now(), MAC: "aa:bb:cc:dd:ee:01", IP: net.ParseIP("192.168.1.10")}
+	in <- Update{Source: "arp", Time: time.Now(), MAC: "aa:bb:cc:dd:ee:02", IP: net.ParseIP("192.168.1.20")}
+	// Active brings an IP-only entry — must NOT appear in KnownIPs (no ARP confirmation).
+	in <- Update{Source: "active", Time: time.Now(), IP: net.ParseIP("192.168.1.30"), Alive: true}
+
+	collectEvents(out, 3, 300*time.Millisecond)
+
+	known := m.KnownIPs()
+	if _, ok := known["192.168.1.10"]; !ok {
+		t.Errorf("expected 192.168.1.10 in KnownIPs")
+	}
+	if _, ok := known["192.168.1.20"]; !ok {
+		t.Errorf("expected 192.168.1.20 in KnownIPs")
+	}
+	if _, ok := known["192.168.1.30"]; ok {
+		t.Errorf("did not expect 192.168.1.30 in KnownIPs (IP-only entry)")
+	}
+	if len(known) != 2 {
+		t.Errorf("expected 2 known IPs, got %d: %v", len(known), known)
+	}
+}
