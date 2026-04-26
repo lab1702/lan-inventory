@@ -165,3 +165,32 @@ func TestMergerActiveAfterARPDoesNotDuplicate(t *testing.T) {
 		t.Errorf("RTT not merged from active update: got %v, want 1ms", devices[0].RTT)
 	}
 }
+
+func TestMergerComputesOSDetect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan Update, 16)
+	out := make(chan model.DeviceEvent, 16)
+	m := NewMerger(MergerOptions{LeftAfter: time.Hour})
+	go m.Run(ctx, in, out)
+
+	// ARP brings vendor=Apple
+	in <- Update{Source: "arp", Time: time.Now(), MAC: "aa:bb:cc:dd:ee:01", IP: net.ParseIP("192.168.1.10"), Vendor: "Apple"}
+	// mDNS brings _airplay._tcp + TXT model=MacBookPro18,2
+	in <- Update{Source: "mdns", Time: time.Now(), IP: net.ParseIP("192.168.1.10"), Services: []model.ServiceInst{
+		{Type: "_airplay._tcp", Name: "mac1", Port: 7000, TXT: map[string]string{"model": "MacBookPro18,2"}},
+	}}
+	// Active brings TTL=128 (would normally be Windows by TTL alone)
+	in <- Update{Source: "active", Time: time.Now(), IP: net.ParseIP("192.168.1.10"), Alive: true, TTL: 128, RTT: time.Millisecond}
+
+	collectEvents(out, 3, 300*time.Millisecond)
+
+	devices := m.Snapshot()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if devices[0].OSGuess != "macOS" {
+		t.Errorf("OSGuess = %q, want macOS (TXT model should override TTL=128)", devices[0].OSGuess)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/grandcat/zeroconf"
@@ -62,12 +63,18 @@ func (w *MDNSWorker) consume(ctx context.Context, svc string, entries <-chan *ze
 			if !ok {
 				return
 			}
+			txt := map[string]string{}
+			for _, kv := range e.Text {
+				if i := strings.IndexByte(kv, '='); i > 0 {
+					txt[strings.ToLower(kv[:i])] = kv[i+1:]
+				}
+			}
 			update := Update{
 				Source:   "mdns",
 				Time:     time.Now(),
 				Hostname: trimDot(e.HostName),
 				Services: []model.ServiceInst{
-					{Type: svc, Name: e.Instance, Port: e.Port},
+					{Type: svc, Name: e.Instance, Port: e.Port, TXT: txt},
 				},
 			}
 			if len(e.AddrIPv4) > 0 {

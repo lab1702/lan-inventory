@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lab1702/lan-inventory/internal/model"
+	"github.com/lab1702/lan-inventory/internal/probe"
 )
 
 // MergerOptions tunes the merger's timing behavior.
@@ -198,9 +199,6 @@ func mergeUpdate(dev *model.Device, u Update) {
 	if u.Vendor != "" {
 		dev.Vendor = u.Vendor
 	}
-	if u.OSGuess != "" {
-		dev.OSGuess = u.OSGuess
-	}
 	if u.OpenPorts != nil {
 		dev.OpenPorts = u.OpenPorts
 	}
@@ -216,6 +214,12 @@ func mergeUpdate(dev *model.Device, u Update) {
 			dev.RTTHistory = dev.RTTHistory[len(dev.RTTHistory)-10:]
 		}
 	}
+	if u.TTL > 0 {
+		dev.TTL = u.TTL
+	}
+	if u.NBNSResponded {
+		dev.NBNSResponded = true
+	}
 	if u.Time.After(dev.LastSeen) {
 		dev.LastSeen = u.Time
 	}
@@ -226,6 +230,7 @@ func mergeUpdate(dev *model.Device, u Update) {
 	// The sweep handles decay back to Stale/Offline based on age.
 	dev.Status = model.StatusOnline
 	sort.Slice(dev.OpenPorts, func(i, j int) bool { return dev.OpenPorts[i].Number < dev.OpenPorts[j].Number })
+	dev.OSGuess = probe.OSDetect(dev, dev.NBNSResponded)
 }
 
 func mergeFromIPOnly(dst, src *model.Device) {
@@ -259,6 +264,12 @@ func mergeFromIPOnly(dst, src *model.Device) {
 	}
 	if src.LastSeen.After(dst.LastSeen) {
 		dst.LastSeen = src.LastSeen
+	}
+	if dst.TTL == 0 {
+		dst.TTL = src.TTL
+	}
+	if src.NBNSResponded {
+		dst.NBNSResponded = true
 	}
 }
 
@@ -296,7 +307,21 @@ func copyDevice(d *model.Device) *model.Device {
 	cp := *d
 	cp.IPs = append([]net.IP(nil), d.IPs...)
 	cp.OpenPorts = append([]model.Port(nil), d.OpenPorts...)
-	cp.Services = append([]model.ServiceInst(nil), d.Services...)
 	cp.RTTHistory = append([]time.Duration(nil), d.RTTHistory...)
+	// Deep-copy services so each TXT map is independent of the live device.
+	if len(d.Services) > 0 {
+		cp.Services = make([]model.ServiceInst, len(d.Services))
+		copy(cp.Services, d.Services)
+		for i := range cp.Services {
+			if d.Services[i].TXT != nil {
+				cp.Services[i].TXT = make(map[string]string, len(d.Services[i].TXT))
+				for k, v := range d.Services[i].TXT {
+					cp.Services[i].TXT[k] = v
+				}
+			}
+		}
+	} else {
+		cp.Services = nil
+	}
 	return &cp
 }

@@ -9,18 +9,20 @@ import (
 )
 
 type Device struct {
-	MAC        string          `json:"mac"`
-	IPs        []net.IP        `json:"ips"`
-	Hostname   string          `json:"hostname"`
-	Vendor     string          `json:"vendor"`
-	OSGuess    string          `json:"os_guess"`
-	OpenPorts  []Port          `json:"open_ports"`
-	Services   []ServiceInst   `json:"services"`
-	RTT        time.Duration   `json:"rtt_ns"`
-	RTTHistory []time.Duration `json:"rtt_history_ns"`
-	FirstSeen  time.Time       `json:"first_seen"`
-	LastSeen   time.Time       `json:"last_seen"`
-	Status     Status          `json:"status"`
+	MAC           string          `json:"mac"`
+	IPs           []net.IP        `json:"ips"`
+	Hostname      string          `json:"hostname"`
+	Vendor        string          `json:"vendor"`
+	OSGuess       string          `json:"os_guess"`
+	OpenPorts     []Port          `json:"open_ports"`
+	Services      []ServiceInst   `json:"services"`
+	RTT           time.Duration   `json:"rtt_ns"`
+	RTTHistory    []time.Duration `json:"rtt_history_ns"`
+	FirstSeen     time.Time       `json:"first_seen"`
+	LastSeen      time.Time       `json:"last_seen"`
+	Status        Status          `json:"status"`
+	TTL           int             `json:"ttl,omitempty"`
+	NBNSResponded bool            `json:"nbns_responded,omitempty"`
 }
 
 type Port struct {
@@ -30,9 +32,10 @@ type Port struct {
 }
 
 type ServiceInst struct {
-	Type string `json:"type"`
-	Name string `json:"name"`
-	Port int    `json:"port"`
+	Type string            `json:"type"`
+	Name string            `json:"name"`
+	Port int               `json:"port"`
+	TXT  map[string]string `json:"txt,omitempty"`
 }
 
 type Status int
