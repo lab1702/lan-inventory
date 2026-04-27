@@ -10,7 +10,7 @@ scripts and cron.
 
 - IP, MAC, vendor (OUI lookup)
 - Hostname (mDNS preferred, reverse DNS fallback)
-- OS family guess (TTL-based)
+- OS family guess (mDNS / vendor / NBNS / ports / TTL)
 - Common open ports with service labels
 - mDNS service announcements
 - Last-seen timestamp and online/stale/offline status
@@ -46,7 +46,7 @@ lan-inventory --version
 
 - `1`–`4` switch tabs (Devices / Services / Subnet / Events)
 - `↑/↓` or `j/k` navigate
-- `/` filter (Enter applies, Esc cancels)
+- `/` filter (Enter or Esc exits filter input; clear with Backspace)
 - `r` force a rescan
 - `q`, `Esc`, or `Ctrl+C` quit
 - `?` help overlay
@@ -65,7 +65,9 @@ lan-inventory --version
 - IPv4 only.
 - Targets /24 home networks; subnets larger than /22 are refused.
 - No persistence: state is wiped on quit.
-- Linux first; macOS support depends on libpcap availability.
+- Linux only. Default-route detection and the kernel-ARP-cache seed are
+  Linux-specific; macOS and Windows builds will fail at startup until those
+  are implemented.
 
 ## Development
 
