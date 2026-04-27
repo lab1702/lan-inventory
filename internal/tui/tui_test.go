@@ -167,35 +167,55 @@ func TestEventsTabShowsRingBuffer(t *testing.T) {
 	}
 }
 
-func TestSortCycleByKey(t *testing.T) {
+func TestFixedSortMACThenIP(t *testing.T) {
+	// MAC-asc primary, IP-numeric secondary. Empty MACs sort to the top
+	// (empty string < any populated MAC) and within an empty-MAC group, IPs
+	// must order numerically — 192.168.1.2 before 192.168.1.10.
 	devices := []*model.Device{
-		{IPs: []net.IP{net.ParseIP("192.168.1.20")}, Hostname: "alpha"},
-		{IPs: []net.IP{net.ParseIP("192.168.1.10")}, Hostname: "zebra"},
+		{MAC: "bb:bb:bb:bb:bb:bb", IPs: []net.IP{net.ParseIP("192.168.1.50")}},
+		{MAC: "", IPs: []net.IP{net.ParseIP("192.168.1.10")}},
+		{MAC: "aa:aa:aa:aa:aa:aa", IPs: []net.IP{net.ParseIP("192.168.1.30")}},
+		{MAC: "", IPs: []net.IP{net.ParseIP("192.168.1.2")}},
 	}
 	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
 	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
 	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
-	time.Sleep(1500 * time.Millisecond) // initial render with default sort (MAC)
-	// Drain accumulated output so the subsequent read only captures post-sort frames.
-	_, _ = io.ReadAll(tm.Output())
-
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // MAC → IP
-	time.Sleep(100 * time.Millisecond)
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}) // IP → Hostname
-	time.Sleep(1500 * time.Millisecond) // give a tick a chance to re-render with the new sort
+	time.Sleep(1500 * time.Millisecond)
 	out, err := io.ReadAll(tm.Output())
 	if err != nil {
 		t.Fatalf("read output: %v", err)
 	}
-	// After cycling to hostname-sort, "alpha" should appear before "zebra"
-	// in the latest frame. LastIndex skips earlier frames (initial render
-	// and the intermediate IP-sort frame) so the assertion targets the
-	// post-cycle hostname-sorted output.
-	alpha := bytes.LastIndex(out, []byte("alpha"))
-	zebra := bytes.LastIndex(out, []byte("zebra"))
-	if alpha < 0 || zebra < 0 || alpha >= zebra {
-		t.Errorf("alpha (%d) should appear before zebra (%d) under hostname sort:\n%s", alpha, zebra, out)
+	want := []string{"192.168.1.2", "192.168.1.10", "192.168.1.30", "192.168.1.50"}
+	prev := -1
+	for _, ip := range want {
+		idx := bytes.LastIndex(out, []byte(ip))
+		if idx < 0 {
+			t.Fatalf("missing %s in output:\n%s", ip, out)
+		}
+		if idx <= prev {
+			t.Fatalf("expected order %v but %s appeared before previous entry:\n%s", want, ip, out)
+		}
+		prev = idx
+	}
+}
+
+func TestSelectionLineRemoved(t *testing.T) {
+	devices := []*model.Device{{MAC: "aa:aa:aa:aa:aa:aa", IPs: []net.IP{net.ParseIP("192.168.1.10")}}}
+	mod := tui.NewModel(tui.Deps{Subnet: "192.168.1.0/24", Iface: "eth0", Snapshot: func() []*model.Device { return devices }})
+	tm := teatest.NewTestModel(t, mod, teatest.WithInitialTermSize(120, 40))
+	defer tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+
+	time.Sleep(1500 * time.Millisecond)
+	out, err := io.ReadAll(tm.Output())
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if bytes.Contains(out, []byte("Selection:")) {
+		t.Errorf("Selection: line should be gone:\n%s", out)
+	}
+	if bytes.Contains(out, []byte("Sort:")) {
+		t.Errorf("Sort: line should be gone:\n%s", out)
 	}
 }
 
