@@ -154,7 +154,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedRow--
 			}
 		case "down", "j":
-			m.selectedRow++
+			n := len(filterDevices(m.devices, m.filterBuf))
+			if m.selectedRow < n-1 {
+				m.selectedRow++
+			}
 		}
 	case tickMsg:
 		if m.deps.Snapshot != nil {
