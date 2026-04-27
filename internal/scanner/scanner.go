@@ -67,6 +67,14 @@ func (s *Scanner) Run(ctx context.Context) error {
 	}
 	s.active.Store(active)
 
+	// Seed the merger from the kernel ARP cache so neighbors the kernel
+	// already knows show up with a MAC immediately, even if no ARP packets
+	// cross the wire during the scan window. Buffered channel (cap 256) is
+	// sized for a /24, so this never blocks in practice.
+	for _, u := range SeedFromKernelARP(s.cfg.Iface.Name, s.cfg.Iface.Subnet) {
+		s.updates <- u
+	}
+
 	var wg sync.WaitGroup
 
 	wg.Add(1)
