@@ -20,12 +20,14 @@ import (
 var manufRaw string
 
 var (
-	once  sync.Once
-	table map[string]string
+	once      sync.Once
+	table     map[string]string
+	longTable map[string]string
 )
 
 func loadTable() {
 	table = make(map[string]string)
+	longTable = make(map[string]string)
 	scanner := bufio.NewScanner(strings.NewReader(manufRaw))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -45,19 +47,44 @@ func loadTable() {
 			continue
 		}
 		table[prefix] = short
+		if len(parts) >= 3 {
+			if long := strings.TrimSpace(parts[2]); long != "" {
+				longTable[prefix] = long
+			}
+		}
 	}
+}
+
+func prefixOf(mac string) (string, bool) {
+	if len(mac) < 8 {
+		return "", false
+	}
+	prefix := strings.ToUpper(mac[:8])
+	if !strings.Contains(prefix, ":") {
+		return "", false
+	}
+	return prefix, true
 }
 
 // Lookup returns the vendor short-name for the given MAC, or "" if unknown.
 // Accepts uppercase or lowercase, with colon separators.
 func Lookup(mac string) string {
 	once.Do(loadTable)
-	if len(mac) < 8 {
-		return ""
-	}
-	prefix := strings.ToUpper(mac[:8])
-	if !strings.Contains(prefix, ":") {
+	prefix, ok := prefixOf(mac)
+	if !ok {
 		return ""
 	}
 	return table[prefix]
+}
+
+// LookupLong returns the vendor long-name (manuf.txt 3rd column) for the
+// given MAC, or "" if unknown. Some entries have only a short name; in that
+// case LookupLong returns "".
+func LookupLong(mac string) string {
+	once.Do(loadTable)
+	prefix, ok := prefixOf(mac)
+	if !ok {
+		return ""
+	}
+	return longTable[prefix]
 }

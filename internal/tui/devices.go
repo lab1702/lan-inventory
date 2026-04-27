@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lab1702/lan-inventory/internal/model"
+	"github.com/lab1702/lan-inventory/internal/oui"
 )
 
 func (m Model) viewDevices() string {
@@ -157,7 +158,11 @@ func detailStrip(d *model.Device) string {
 	b.WriteString(styleDim.Render("─── selected ─────────────────────────"))
 	b.WriteString("\n")
 	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("MAC:     "), d.MAC))
-	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("Vendor:  "), d.Vendor))
+	vendor := oui.LookupLong(d.MAC)
+	if vendor == "" {
+		vendor = d.Vendor
+	}
+	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("Vendor:  "), vendor))
 	b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("OS guess:"), d.OSGuess))
 	if len(d.OpenPorts) > 0 {
 		ports := make([]string, 0, len(d.OpenPorts))
