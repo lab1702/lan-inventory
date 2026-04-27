@@ -23,21 +23,6 @@ const (
 	tabEvents
 )
 
-type sortKey int
-
-const (
-	sortByMAC sortKey = iota // default — first listed so the zero value is MAC sort
-	sortByIP
-	sortByHostname
-	sortByVendor
-	sortByRTT
-	sortByLastSeen
-)
-
-func (k sortKey) String() string {
-	return [...]string{"mac", "ip", "hostname", "vendor", "rtt", "last_seen"}[k]
-}
-
 // Deps wires runtime dependencies into the TUI. Empty values are tolerated for
 // tests; production callers should supply Snapshot/Events.
 type Deps struct {
@@ -63,7 +48,6 @@ type Model struct {
 	quitting     bool
 
 	// Devices-tab interaction state
-	sortKey      sortKey
 	filterBuf    string // current filter text
 	filterMode   bool   // true while typing filter
 	selectedRow  int    // selected device index after sort+filter
@@ -145,8 +129,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tab = tabSubnet
 		case "4":
 			m.tab = tabEvents
-		case "s":
-			m.sortKey = (m.sortKey + 1) % 6
 		case "/":
 			m.filterMode = true
 			m.filterBuf = ""
@@ -220,7 +202,6 @@ func helpText() string {
 		{"1-4", "switch tabs (Devices / Services / Subnet / Events)"},
 		{"↑/↓ or k/j", "navigate selection"},
 		{"Enter", "(in filter mode) apply the filter"},
-		{"s", "cycle sort key (mac → ip → hostname → vendor → rtt → last_seen)"},
 		{"/", "start filter (typing narrows the device list; Enter applies)"},
 		{"r", "force a rescan now"},
 		{"?", "toggle this help"},

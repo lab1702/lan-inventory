@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 func (m Model) viewDevices() string {
 	devices := filterDevices(m.devices, m.filterBuf)
-	sortDevices(devices, m.sortKey)
+	sortDevices(devices)
 	if len(devices) == 0 {
 		return "(no devices match)"
 	}
@@ -22,8 +23,6 @@ func (m Model) viewDevices() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(styleDim.Render(fmt.Sprintf("Sort: %s   Selection: %d/%d", m.sortKey, m.selectedRow+1, len(devices))))
-	b.WriteString("\n\n")
 
 	const (
 		wIP     = 15
@@ -134,23 +133,22 @@ func matchesFilter(d *model.Device, q string) bool {
 	return false
 }
 
-func sortDevices(devs []*model.Device, key sortKey) {
+// sortDevices orders by MAC ascending, then by first IP numerically.
+// IPs are compared as bytes (To16 normalized) so 192.168.0.2 sorts before
+// 192.168.0.10 — string sort would invert that.
+func sortDevices(devs []*model.Device) {
 	sort.SliceStable(devs, func(i, j int) bool {
-		switch key {
-		case sortByMAC:
+		if devs[i].MAC != devs[j].MAC {
 			return devs[i].MAC < devs[j].MAC
-		case sortByIP:
-			return firstIP(devs[i]) < firstIP(devs[j])
-		case sortByHostname:
-			return devs[i].Hostname < devs[j].Hostname
-		case sortByVendor:
-			return devs[i].Vendor < devs[j].Vendor
-		case sortByRTT:
-			return devs[i].RTT < devs[j].RTT
-		case sortByLastSeen:
-			return devs[i].LastSeen.After(devs[j].LastSeen)
 		}
-		return false
+		var ai, bi []byte
+		if len(devs[i].IPs) > 0 {
+			ai = devs[i].IPs[0].To16()
+		}
+		if len(devs[j].IPs) > 0 {
+			bi = devs[j].IPs[0].To16()
+		}
+		return bytes.Compare(ai, bi) < 0
 	})
 }
 

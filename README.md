@@ -46,7 +46,6 @@ lan-inventory --version
 
 - `1`–`4` switch tabs (Devices / Services / Subnet / Events)
 - `↑/↓` or `j/k` navigate
-- `s` cycle sort key
 - `/` filter (Enter applies, Esc cancels)
 - `r` force a rescan
 - `q`, `Esc`, or `Ctrl+C` quit
