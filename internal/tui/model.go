@@ -102,8 +102,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyCtrlC:
 				m.quitting = true
 				return m, tea.Quit
-			case tea.KeyEnter, tea.KeyEsc:
+			case tea.KeyEnter:
 				m.filterMode = false
+			case tea.KeyEsc:
+				m.filterMode = false
+				m.filterBuf = ""
 			case tea.KeyBackspace:
 				if n := len(m.filterBuf); n > 0 {
 					m.filterBuf = m.filterBuf[:n-1]
@@ -118,7 +121,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		case "esc":
+			if m.filterBuf != "" {
+				m.filterBuf = ""
+				return m, nil
+			}
+			m.quitting = true
+			return m, tea.Quit
+		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
 		case "1":
