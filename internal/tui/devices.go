@@ -43,7 +43,7 @@ func (m Model) viewDevices() string {
 		padRight(styleHeaderRow.Render("RTT"), wRTT),
 		styleHeaderRow.Render("Status"),
 	}
-	header := strings.Join(headerCells, "  ")
+	header := "  " + strings.Join(headerCells, "  ")
 	b.WriteString(header)
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render(strings.Repeat("-", visibleLen(header))))
