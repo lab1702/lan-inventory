@@ -100,7 +100,7 @@ func (m *Merger) Run(ctx context.Context, in <-chan Update, out chan<- model.Dev
 			}
 			m.handleUpdate(u, out)
 		case now := <-ticker.C:
-			m.sweepStatus(now, out)
+			m.sweepStatus(ctx, now, out)
 		}
 	}
 }
@@ -174,7 +174,7 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 //   - Online (≤ StaleAfter)
 //   - Stale  (StaleAfter < age ≤ LeftAfter)
 //   - Offline (age > LeftAfter) — emits EventLeft on the transition
-func (m *Merger) sweepStatus(now time.Time, out chan<- model.DeviceEvent) {
+func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- model.DeviceEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	staleCut := now.Add(-m.opts.StaleAfter)
@@ -185,9 +185,12 @@ func (m *Merger) sweepStatus(now time.Time, out chan<- model.DeviceEvent) {
 		case d.LastSeen.Before(leftCut):
 			if d.Status != model.StatusOffline {
 				d.Status = model.StatusOffline
+				// EventLeft is a one-shot transition (at most once per
+				// device per session) — block briefly so a bursty
+				// disappearance doesn't lose entries from the Events tab.
 				select {
 				case out <- model.DeviceEvent{Type: model.EventLeft, Device: copyDevice(d)}:
-				default:
+				case <-ctx.Done():
 				}
 			}
 		case d.LastSeen.Before(staleCut):
