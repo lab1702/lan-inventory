@@ -67,18 +67,23 @@ func (s *Scanner) Run(ctx context.Context) error {
 	}
 	s.active.Store(active)
 
-	// Seed the merger from the kernel ARP cache so neighbors the kernel
-	// already knows show up with a MAC immediately, even if no ARP packets
-	// cross the wire during the scan window. Buffered channel (cap 256) is
-	// sized for a /24, so this never blocks in practice.
-	for _, u := range SeedFromKernelARP(s.cfg.Iface.Name, s.cfg.Iface.Subnet) {
-		s.updates <- u
-	}
-
 	var wg sync.WaitGroup
 
+	// Merger must be running before we seed: a /22 ARP cache can hold up to
+	// 1022 entries, which would otherwise overflow the 256-slot updates
+	// buffer and deadlock at startup.
 	wg.Add(1)
 	go func() { defer wg.Done(); s.merger.Run(ctx, s.updates, s.events) }()
+
+	// Seed the merger from the kernel ARP cache so neighbors the kernel
+	// already knows show up with a MAC immediately, even if no ARP packets
+	// cross the wire during the scan window.
+	for _, u := range SeedFromKernelARP(s.cfg.Iface.Name, s.cfg.Iface.Subnet) {
+		select {
+		case s.updates <- u:
+		case <-ctx.Done():
+		}
+	}
 
 	wg.Add(1)
 	go func() { defer wg.Done(); _ = arp.Run(ctx, s.updates) }()
