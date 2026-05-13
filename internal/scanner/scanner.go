@@ -56,8 +56,8 @@ func (s *Scanner) Snapshot() []*model.Device { return s.merger.Snapshot() }
 func (s *Scanner) Run(ctx context.Context) error {
 	hosts := netiface.SubnetIPs(s.cfg.Iface.Subnet)
 
-	arp := &ARPWorker{IfaceName: s.cfg.Iface.Name}
-	mdns := &MDNSWorker{IfaceName: s.cfg.Iface.Name}
+	arp := &ARPWorker{Iface: s.cfg.Iface}
+	mdns := &MDNSWorker{}
 	active := &ActiveWorker{
 		Subnet:      s.cfg.Iface.Subnet,
 		HostIPs:     hosts,

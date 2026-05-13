@@ -48,7 +48,7 @@ func main() {
 		os.Exit(exitConfig)
 	}
 
-	if err := scanner.Precheck(iface.Name); err != nil {
+	if err := scanner.Precheck(iface); err != nil {
 		fmt.Fprintln(os.Stderr, "lan-inventory: needs packet-capture access on this interface.")
 		switch runtime.GOOS {
 		case "linux":

@@ -13,19 +13,24 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 
+	"github.com/lab1702/lan-inventory/internal/netiface"
 	"github.com/lab1702/lan-inventory/internal/oui"
 )
 
 // ARPWorker passively sniffs ARP packets on the given interface and emits an
 // Update for every packet seen.
 type ARPWorker struct {
-	IfaceName string
+	Iface *netiface.Info
 }
 
 func (w *ARPWorker) Run(ctx context.Context, out chan<- Update) error {
-	handle, err := pcap.OpenLive(w.IfaceName, 65536, true, pcap.BlockForever)
+	dev, err := pcapDeviceName(w.Iface)
 	if err != nil {
-		return fmt.Errorf("pcap open %s: %w (do you have CAP_NET_RAW?)", w.IfaceName, err)
+		return fmt.Errorf("resolve pcap device: %w", err)
+	}
+	handle, err := pcap.OpenLive(dev, 65536, true, pcap.BlockForever)
+	if err != nil {
+		return fmt.Errorf("pcap open %s: %w (do you have CAP_NET_RAW or Npcap installed?)", dev, err)
 	}
 	defer handle.Close()
 

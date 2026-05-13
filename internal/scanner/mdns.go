@@ -16,9 +16,7 @@ import (
 
 // MDNSWorker browses for mDNS services on the given interface and emits an
 // Update for each discovered instance.
-type MDNSWorker struct {
-	IfaceName string
-}
+type MDNSWorker struct{}
 
 // commonServiceTypes is the seed list we actively browse for. zeroconf doesn't
 // support a single "browse everything" query well, so we enumerate a handful
