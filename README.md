@@ -52,6 +52,28 @@ start.
 ICMP echo uses the unprivileged `IcmpSendEcho` Win32 API on Windows, so
 no Administrator prompt is needed at runtime.
 
+### macOS
+
+The recommended path uses Wireshark's ChmodBPF launchd helper to grant
+non-root access to `/dev/bpf*`, mirroring the Linux `setcap` UX:
+
+```bash
+brew install --cask wireshark
+go install github.com/lab1702/lan-inventory/cmd/lan-inventory@latest
+lan-inventory
+```
+
+Or, without Wireshark, run per-invocation as root:
+
+```bash
+go install github.com/lab1702/lan-inventory/cmd/lan-inventory@latest
+sudo lan-inventory
+```
+
+libpcap ships with macOS — no extra install step is needed. ICMP uses
+unprivileged `SOCK_DGRAM` sockets, so the only privilege gate is BPF
+read access.
+
 ## Usage
 
 ```bash
@@ -84,7 +106,7 @@ lan-inventory --version
 - IPv4 only.
 - Targets /24 home networks; subnets larger than /22 are refused.
 - No persistence: state is wiped on quit.
-- Supported on Linux and Windows. macOS and *BSD builds compile but fail
+- Supported on Linux, macOS, and Windows. *BSD builds compile but fail
   at startup (default-route detection is not implemented for those
   platforms).
 
