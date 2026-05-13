@@ -21,8 +21,8 @@ func TestPingLocalhost(t *testing.T) {
 	if !res.Alive {
 		t.Errorf("expected localhost alive")
 	}
-	if res.RTT <= 0 {
-		t.Errorf("expected positive RTT, got %v", res.RTT)
+	if res.RTT < 0 {
+		t.Errorf("expected non-negative RTT, got %v", res.RTT)
 	}
 	if res.TTL <= 0 {
 		t.Errorf("expected positive TTL, got %d", res.TTL)

@@ -10,6 +10,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/muesli/termenv v0.16.0
 	github.com/prometheus-community/pro-bing v0.8.0
+	golang.org/x/sys v0.40.0
 )
 
 require (
@@ -35,6 +36,5 @@ require (
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )
