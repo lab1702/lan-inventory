@@ -14,8 +14,10 @@ import (
 )
 
 // Ping sends a single ICMP echo to the given IP and waits for a reply, with
-// the timeout taken from ctx. Requires raw socket privilege; the caller is
-// responsible for surfacing setup errors.
+// the timeout taken from ctx. On Linux this opens a raw socket and requires
+// CAP_NET_RAW (setcap or sudo); on macOS and *BSD it uses unprivileged
+// SOCK_DGRAM ICMP, which needs no extra privilege. The caller is responsible
+// for surfacing setup errors.
 func Ping(ctx context.Context, ip string) (PingResult, error) {
 	pinger, err := probing.NewPinger(ip)
 	if err != nil {
