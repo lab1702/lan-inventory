@@ -58,6 +58,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Install Npcap from https://npcap.com/")
 			fmt.Fprintln(os.Stderr, `(check "WinPcap API-compatible mode" during install).`)
 			fmt.Fprintln(os.Stderr, "The driver grants user-level capture; no per-run Administrator needed.")
+		case "darwin":
+			fmt.Fprintln(os.Stderr, "Either install Wireshark's ChmodBPF helper")
+			fmt.Fprintln(os.Stderr, "(brew install --cask wireshark), or run with sudo:")
+			fmt.Fprintln(os.Stderr, "    sudo lan-inventory")
 		default:
 			fmt.Fprintln(os.Stderr, "This platform may need additional privileges to open packet capture.")
 			fmt.Fprintln(os.Stderr, "Consult your OS docs for how to grant raw-socket / pcap access.")
