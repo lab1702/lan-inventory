@@ -12,6 +12,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // gatewayCandidate is one row of the working set used to pick the
@@ -57,8 +60,55 @@ func defaultRouteInterface() (*net.Interface, net.IP, error) {
 	return iface, best.Gateway, nil
 }
 
-// collectGatewayCandidates is the syscall-touching half of the resolver.
-// Implemented in Task 5.
+// collectGatewayCandidates calls GetAdaptersAddresses with
+// GAA_FLAG_INCLUDE_GATEWAYS and returns one candidate per operational
+// adapter that has at least one IPv4 gateway. The adapter's Ipv4Metric is
+// captured as Metric so pickBestGatewayCandidate can choose the default
+// route.
 func collectGatewayCandidates() ([]gatewayCandidate, error) {
-	return nil, errors.New("collectGatewayCandidates: not yet implemented")
+	const flags = windows.GAA_FLAG_INCLUDE_GATEWAYS |
+		windows.GAA_FLAG_SKIP_ANYCAST |
+		windows.GAA_FLAG_SKIP_MULTICAST |
+		windows.GAA_FLAG_SKIP_DNS_SERVER
+
+	// Probe size, then allocate.
+	var bufLen uint32
+	err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, flags, 0, nil, &bufLen)
+	if err != windows.ERROR_BUFFER_OVERFLOW {
+		return nil, fmt.Errorf("GetAdaptersAddresses (size probe): %w", err)
+	}
+	buf := make([]byte, bufLen)
+	first := (*windows.IpAdapterAddresses)(unsafe.Pointer(&buf[0]))
+	if err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, flags, 0, first, &bufLen); err != nil {
+		return nil, fmt.Errorf("GetAdaptersAddresses: %w", err)
+	}
+
+	var cands []gatewayCandidate
+	for aa := first; aa != nil; aa = aa.Next {
+		if aa.OperStatus != windows.IfOperStatusUp {
+			continue
+		}
+		gw := firstIPv4Gateway(aa)
+		if gw == nil {
+			continue
+		}
+		cands = append(cands, gatewayCandidate{
+			IfaceIndex: aa.IfIndex,
+			Gateway:    gw,
+			Metric:     aa.Ipv4Metric,
+		})
+	}
+	return cands, nil
+}
+
+// firstIPv4Gateway returns the first IPv4 address found in the adapter's
+// linked list of gateway addresses, or nil if there is none.
+func firstIPv4Gateway(aa *windows.IpAdapterAddresses) net.IP {
+	for ga := aa.FirstGatewayAddress; ga != nil; ga = ga.Next {
+		ip := ga.Address.IP()
+		if ip4 := ip.To4(); ip4 != nil {
+			return ip4
+		}
+	}
+	return nil
 }
