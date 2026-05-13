@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -48,9 +49,19 @@ func main() {
 	}
 
 	if err := scanner.Precheck(iface.Name); err != nil {
-		fmt.Fprintln(os.Stderr, "lan-inventory: needs raw socket access to sniff ARP and send ICMP.")
-		fmt.Fprintln(os.Stderr, "Either run with sudo, or grant capabilities once:")
-		fmt.Fprintln(os.Stderr, "    sudo setcap cap_net_raw,cap_net_admin=eip $(which lan-inventory)")
+		fmt.Fprintln(os.Stderr, "lan-inventory: needs packet-capture access on this interface.")
+		switch runtime.GOOS {
+		case "linux":
+			fmt.Fprintln(os.Stderr, "Either run with sudo, or grant capabilities once:")
+			fmt.Fprintln(os.Stderr, "    sudo setcap cap_net_raw,cap_net_admin=eip $(which lan-inventory)")
+		case "windows":
+			fmt.Fprintln(os.Stderr, "Install Npcap from https://npcap.com/")
+			fmt.Fprintln(os.Stderr, `(check "WinPcap API-compatible mode" during install).`)
+			fmt.Fprintln(os.Stderr, "The driver grants user-level capture; no per-run Administrator needed.")
+		default:
+			fmt.Fprintln(os.Stderr, "This platform may need additional privileges to open packet capture.")
+			fmt.Fprintln(os.Stderr, "Consult your OS docs for how to grant raw-socket / pcap access.")
+		}
 		os.Exit(exitConfig)
 	}
 
