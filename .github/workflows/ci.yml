@@ -7,14 +7,32 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24'
-      - name: Install libpcap
+
+      - name: Install libpcap (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
+
+      - name: Install Npcap SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $sdk = "$env:RUNNER_TEMP\npcap-sdk"
+          New-Item -ItemType Directory -Force $sdk | Out-Null
+          Invoke-WebRequest https://npcap.com/dist/npcap-sdk-1.13.zip -OutFile "$env:RUNNER_TEMP\sdk.zip"
+          Expand-Archive "$env:RUNNER_TEMP\sdk.zip" -DestinationPath $sdk -Force
+          echo "CGO_CFLAGS=-I$sdk\Include" >> $env:GITHUB_ENV
+          echo "CGO_LDFLAGS=-L$sdk\Lib\x64" >> $env:GITHUB_ENV
+
       - run: go vet ./...
       - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
       - run: go test ./...
