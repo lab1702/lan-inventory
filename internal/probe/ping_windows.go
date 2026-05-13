@@ -48,7 +48,7 @@ func Ping(ctx context.Context, ip string) (PingResult, error) {
 	}
 
 	requestData := []byte("lan-inventory")
-	replyBufLen := int(unsafe.Sizeof(icmpEchoReply{})) + len(requestData) + 8
+	replyBufLen := int(unsafe.Sizeof(icmpEchoReply{})) + len(requestData) + icmpReplyGuardBytes
 	replyBuf := make([]byte, replyBufLen)
 
 	ret, _, _ := procIcmpSendEcho.Call(
@@ -101,6 +101,10 @@ type icmpEchoReply struct {
 const (
 	ipStatusSuccess uint32 = 0
 	invalidHandle          = ^uintptr(0)
+	// icmpReplyGuardBytes is the +8 byte margin MSDN's IcmpSendEcho reference
+	// requires beyond sizeof(ICMP_ECHO_REPLY) + RequestSize, to leave room
+	// for an embedded ICMP error message if the ping fails.
+	icmpReplyGuardBytes = 8
 )
 
 var (

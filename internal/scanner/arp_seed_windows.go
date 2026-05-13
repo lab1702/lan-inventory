@@ -106,6 +106,7 @@ const (
 	nlNeighborStateDelay       = 3
 	nlNeighborStateStale       = 4
 	nlNeighborStateReachable   = 5
+	nlNeighborStatePermanent   = 6
 )
 
 func neighborReachable(state uint32) bool {
@@ -113,7 +114,8 @@ func neighborReachable(state uint32) bool {
 	case nlNeighborStateReachable,
 		nlNeighborStateStale,
 		nlNeighborStateDelay,
-		nlNeighborStateProbe:
+		nlNeighborStateProbe,
+		nlNeighborStatePermanent:
 		return true
 	}
 	return false
