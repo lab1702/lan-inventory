@@ -42,3 +42,18 @@ func TestPingDeadIP(t *testing.T) {
 		t.Errorf("expected 192.0.2.1 not alive, got %v", res)
 	}
 }
+
+func TestPingHonorsCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before calling
+
+	start := time.Now()
+	_, err := probe.Ping(ctx, "192.0.2.1")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Errorf("want error on cancelled context")
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("cancelled ping took %v; expected near-instant return", elapsed)
+	}
+}

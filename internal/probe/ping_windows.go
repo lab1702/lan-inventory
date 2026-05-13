@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//go:build windows
+//go:build windows && (amd64 || arm64)
 
 package probe
 
@@ -30,8 +30,12 @@ func Ping(ctx context.Context, ip string) (PingResult, error) {
 	}
 	dest := ipv4ToIPAddr(ip4)
 
+	if err := ctx.Err(); err != nil {
+		return PingResult{}, fmt.Errorf("ping: %w", err)
+	}
+
 	handle, _, _ := procIcmpCreateFile.Call()
-	if handle == 0 || handle == invalidHandle {
+	if handle == invalidHandle {
 		return PingResult{}, errors.New("ping: IcmpCreateFile failed")
 	}
 	defer procIcmpCloseHandle.Call(handle)
@@ -71,15 +75,15 @@ func Ping(ctx context.Context, ip string) (PingResult, error) {
 	}, nil
 }
 
-// ipv4ToIPAddr packs an IPv4 net.IP into the uint32 value Win32 expects
-// for an IPAddr (network byte order, little-endian-loaded).
+// ipv4ToIPAddr packs the four octets into a uint32 so their in-memory
+// layout on a little-endian host is octets[0]..octets[3] — the bytewise
+// representation Win32's IPAddr uses.
 func ipv4ToIPAddr(ip4 net.IP) uint32 {
 	return uint32(ip4[0]) | uint32(ip4[1])<<8 | uint32(ip4[2])<<16 | uint32(ip4[3])<<24
 }
 
-// icmpEchoReply mirrors ICMP_ECHO_REPLY from <ipexport.h>. The pointer
-// fields (Data, OptionsData) are sized for x64; on 32-bit Windows the
-// layout differs and this struct will need adjustment.
+// icmpEchoReply mirrors ICMP_ECHO_REPLY from <ipexport.h>.
+// Layout validated for amd64 and arm64 (8-byte pointer fields).
 type icmpEchoReply struct {
 	Address       uint32
 	Status        uint32
