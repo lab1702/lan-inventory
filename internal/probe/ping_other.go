@@ -7,6 +7,7 @@ package probe
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	probing "github.com/prometheus-community/pro-bing"
@@ -20,7 +21,7 @@ func Ping(ctx context.Context, ip string) (PingResult, error) {
 	if err != nil {
 		return PingResult{}, fmt.Errorf("new pinger: %w", err)
 	}
-	pinger.SetPrivileged(true)
+	pinger.SetPrivileged(runtime.GOOS == "linux")
 	pinger.Count = 1
 	pinger.Timeout = 1 * time.Second
 	if dl, ok := ctx.Deadline(); ok {
