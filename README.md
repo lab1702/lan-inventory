@@ -17,6 +17,8 @@ scripts and cron.
 
 ## Install
 
+### Linux
+
 ```bash
 go install github.com/lab1702/lan-inventory/cmd/lan-inventory@latest
 sudo setcap cap_net_raw,cap_net_admin=eip $(which lan-inventory)
@@ -30,8 +32,25 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./bin/lan-inventory
 ./bin/lan-inventory
 ```
 
-The `setcap` step is needed once; `lan-inventory` requires raw-socket access
-to sniff ARP packets and send ICMP ping. Without it the tool refuses to start.
+The `setcap` step is needed once; `lan-inventory` needs raw-socket access
+to sniff ARP packets and send ICMP ping. Without it the tool refuses to
+start.
+
+### Windows
+
+1. Install [Npcap](https://npcap.com/) and check
+   **"WinPcap API-compatible mode"** during install. The driver grants
+   user-level packet capture so the binary runs from an ordinary
+   (non-elevated) terminal.
+2. Install the binary:
+
+   ```powershell
+   go install github.com/lab1702/lan-inventory/cmd/lan-inventory@latest
+   lan-inventory
+   ```
+
+ICMP echo uses the unprivileged `IcmpSendEcho` Win32 API on Windows, so
+no Administrator prompt is needed at runtime.
 
 ## Usage
 
@@ -65,9 +84,9 @@ lan-inventory --version
 - IPv4 only.
 - Targets /24 home networks; subnets larger than /22 are refused.
 - No persistence: state is wiped on quit.
-- Linux only. Default-route detection and the kernel-ARP-cache seed are
-  Linux-specific; macOS and Windows builds will fail at startup until those
-  are implemented.
+- Supported on Linux and Windows. macOS and *BSD builds compile but fail
+  at startup (default-route detection is not implemented for those
+  platforms).
 
 ## Development
 
