@@ -1,5 +1,8 @@
 .PHONY: build test lint vet smoke clean manuf-refresh
 
+# Windows users: run `go build ./cmd/lan-inventory` directly — the setcap
+# step does not apply. Npcap install handles capture privilege at install
+# time.
 build:
 	go build -o bin/lan-inventory ./cmd/lan-inventory
 
