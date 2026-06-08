@@ -29,16 +29,17 @@ type ActiveWorker struct {
 }
 
 func (w *ActiveWorker) Run(ctx context.Context, out chan<- Update) error {
-	if w.Interval == 0 {
-		w.Interval = 30 * time.Second
-	}
-	if w.WorkerCount == 0 {
-		w.WorkerCount = 32
+	// Defaults are resolved into locals rather than written back onto w: Run
+	// can race a concurrent SweepOnce (UI rescan), so the worker's fields must
+	// stay read-only after construction.
+	interval := w.Interval
+	if interval == 0 {
+		interval = 30 * time.Second
 	}
 
 	// Run an initial sweep immediately, then on the interval.
 	w.sweepOnce(ctx, out)
-	ticker := time.NewTicker(w.Interval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -63,9 +64,13 @@ func (w *ActiveWorker) sweepOnce(ctx context.Context, out chan<- Update) {
 	if w.KnownIPs != nil {
 		known = w.KnownIPs()
 	}
+	workerCount := w.WorkerCount
+	if workerCount == 0 {
+		workerCount = 32
+	}
 	jobs := make(chan net.IP, len(w.HostIPs))
 	var wg sync.WaitGroup
-	for i := 0; i < w.WorkerCount; i++ {
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

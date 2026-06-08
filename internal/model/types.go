@@ -6,6 +6,7 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"time"
 )
@@ -78,7 +79,7 @@ func (s *Status) UnmarshalJSON(b []byte) error {
 	case "offline":
 		*s = StatusOffline
 	default:
-		*s = StatusOffline
+		return fmt.Errorf("unknown status %q", str)
 	}
 	return nil
 }
@@ -121,7 +122,7 @@ func (e *EventType) UnmarshalJSON(b []byte) error {
 	case "left":
 		*e = EventLeft
 	default:
-		*e = EventJoined
+		return fmt.Errorf("unknown event type %q", str)
 	}
 	return nil
 }

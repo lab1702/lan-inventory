@@ -75,6 +75,17 @@ func TestStatusJSONString(t *testing.T) {
 	}
 }
 
+func TestStatusUnmarshalRejectsUnknown(t *testing.T) {
+	var s model.Status
+	if err := json.Unmarshal([]byte(`"bogus"`), &s); err == nil {
+		t.Errorf("expected error unmarshaling unknown status, got nil")
+	}
+	var e model.EventType
+	if err := json.Unmarshal([]byte(`"bogus"`), &e); err == nil {
+		t.Errorf("expected error unmarshaling unknown event type, got nil")
+	}
+}
+
 func TestEventTypeJSONRoundTrip(t *testing.T) {
 	cases := []struct {
 		etype model.EventType

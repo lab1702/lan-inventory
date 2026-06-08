@@ -159,8 +159,14 @@ func signalContext() (context.Context, context.CancelFunc) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-ch
-		cancel()
+		select {
+		case <-ch:
+			cancel()
+		case <-ctx.Done():
+			// Caller cancelled (e.g. normal TUI quit) — unwind instead of
+			// parking on <-ch forever.
+		}
+		signal.Stop(ch)
 	}()
 	return ctx, cancel
 }

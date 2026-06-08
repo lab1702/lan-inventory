@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grandcat/zeroconf"
@@ -40,17 +41,24 @@ func (w *MDNSWorker) Run(ctx context.Context, out chan<- Update) error {
 		return fmt.Errorf("zeroconf resolver: %w", err)
 	}
 
+	var wg sync.WaitGroup
 	for _, svc := range commonServiceTypes {
-		svc := svc
 		entries := make(chan *zeroconf.ServiceEntry, 16)
-		go w.consume(ctx, svc, entries, out)
+		wg.Add(2)
 		go func() {
-			if err := resolver.Browse(ctx, svc, "local.", entries); err != nil {
-				return
-			}
+			defer wg.Done()
+			w.consume(ctx, svc, entries, out)
+		}()
+		go func() {
+			defer wg.Done()
+			// Browse blocks until ctx is cancelled; its error is best-effort.
+			_ = resolver.Browse(ctx, svc, "local.", entries)
 		}()
 	}
 	<-ctx.Done()
+	// Wait for the browse/consume goroutines to unwind before returning so they
+	// don't outlive the worker.
+	wg.Wait()
 	return nil
 }
 
