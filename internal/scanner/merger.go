@@ -176,22 +176,19 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 //   - Offline (age > LeftAfter) — emits EventLeft on the transition
 func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- model.DeviceEvent) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	staleCut := now.Add(-m.opts.StaleAfter)
 	leftCut := now.Add(-m.opts.LeftAfter)
 
+	// Collect Left events under the lock but send them after releasing it: a
+	// blocking send while holding m.mu would stall handleUpdate — and thus
+	// every worker feeding the updates channel — if the Events consumer is slow.
+	var leftEvents []model.DeviceEvent
 	transition := func(d *model.Device) {
 		switch {
 		case d.LastSeen.Before(leftCut):
 			if d.Status != model.StatusOffline {
 				d.Status = model.StatusOffline
-				// EventLeft is a one-shot transition (at most once per
-				// device per session) — block briefly so a bursty
-				// disappearance doesn't lose entries from the Events tab.
-				select {
-				case out <- model.DeviceEvent{Type: model.EventLeft, Device: copyDevice(d)}:
-				case <-ctx.Done():
-				}
+				leftEvents = append(leftEvents, model.DeviceEvent{Type: model.EventLeft, Device: copyDevice(d)})
 			}
 		case d.LastSeen.Before(staleCut):
 			if d.Status == model.StatusOnline {
@@ -204,6 +201,18 @@ func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- mode
 	}
 	for _, d := range m.byIP {
 		transition(d)
+	}
+	m.mu.Unlock()
+
+	// EventLeft is a one-shot transition (at most once per device per session)
+	// — block briefly so a bursty disappearance doesn't lose entries from the
+	// Events tab, but only now that the lock is released.
+	for _, e := range leftEvents {
+		select {
+		case out <- e:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -223,7 +232,13 @@ func mergeUpdate(dev *model.Device, u Update) {
 	if u.Vendor != "" {
 		dev.Vendor = u.Vendor
 	}
-	if u.OpenPorts != nil {
+	// The active prober reports the full current port set on every sweep, so
+	// an empty (nil) result means "all ports closed" and must clear stale
+	// entries. Other sources (arp/mdns) never scan ports, so a nil OpenPorts
+	// from them carries no information and must not wipe the existing set.
+	if u.Source == "active" {
+		dev.OpenPorts = u.OpenPorts
+	} else if u.OpenPorts != nil {
 		dev.OpenPorts = u.OpenPorts
 	}
 	for _, s := range u.Services {

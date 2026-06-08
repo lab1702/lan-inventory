@@ -168,6 +168,61 @@ func TestMergerActiveAfterARPDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+func TestMergerActiveSweepClearsStalePorts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan Update, 16)
+	out := make(chan model.DeviceEvent, 16)
+	m := NewMerger(MergerOptions{LeftAfter: time.Hour})
+	go m.Run(ctx, in, out)
+
+	ip := net.ParseIP("192.168.1.70")
+	// First active sweep finds port 22 open.
+	in <- Update{Source: "active", Time: time.Now(), IP: ip, Alive: true,
+		OpenPorts: []model.Port{{Number: 22, Proto: "tcp", Service: "ssh"}}}
+	// An mDNS update (no port info) must NOT wipe the recorded ports.
+	in <- Update{Source: "mdns", Time: time.Now(), IP: ip, Hostname: "host.local"}
+	// Next active sweep: the service stopped, ScanPorts returns nil.
+	in <- Update{Source: "active", Time: time.Now(), IP: ip, Alive: true, OpenPorts: nil}
+
+	collectEvents(out, 3, 300*time.Millisecond)
+
+	devices := m.Snapshot()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if len(devices[0].OpenPorts) != 0 {
+		t.Errorf("active sweep with no open ports should clear stale ports, got %v", devices[0].OpenPorts)
+	}
+}
+
+func TestMergerNonActiveUpdateKeepsPorts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	in := make(chan Update, 16)
+	out := make(chan model.DeviceEvent, 16)
+	m := NewMerger(MergerOptions{LeftAfter: time.Hour})
+	go m.Run(ctx, in, out)
+
+	ip := net.ParseIP("192.168.1.71")
+	in <- Update{Source: "active", Time: time.Now(), IP: ip, Alive: true,
+		OpenPorts: []model.Port{{Number: 80, Proto: "tcp", Service: "http"}}}
+	// An ARP update carries no port info; the existing port set must survive.
+	in <- Update{Source: "arp", Time: time.Now(), MAC: "aa:bb:cc:dd:ee:71", IP: ip}
+
+	collectEvents(out, 2, 300*time.Millisecond)
+
+	devices := m.Snapshot()
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if len(devices[0].OpenPorts) != 1 || devices[0].OpenPorts[0].Number != 80 {
+		t.Errorf("non-active update must not clear ports, got %v", devices[0].OpenPorts)
+	}
+}
+
 func TestMergerComputesOSDetect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
