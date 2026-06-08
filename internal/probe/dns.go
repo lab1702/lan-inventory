@@ -79,7 +79,13 @@ func ReverseDNSMDNS(ctx context.Context, ip string) string {
 //   3. NBNS (UDP 137)
 //   4. mDNS reverse (UDP 5353 unicast)
 func ResolveHostname(ctx context.Context, ip string, gatewayIP net.IP) string {
-	if name := ReverseDNS(ctx, ip); name != "" {
+	// Bound step 1 explicitly. net.DefaultResolver honors ctx, but the caller's
+	// ctx may carry no deadline (TUI mode), and a hung system resolver would
+	// otherwise stall the whole chain — contrary to this function's contract.
+	rctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	name := ReverseDNS(rctx, ip)
+	cancel()
+	if name != "" {
 		return name
 	}
 	if gatewayIP != nil {

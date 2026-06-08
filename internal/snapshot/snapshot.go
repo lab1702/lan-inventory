@@ -159,14 +159,22 @@ func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", pad)
 }
 
+// truncate shortens s to at most max runes, appending "…" when it cuts.
+// It counts and slices by rune, not byte, so multi-byte UTF-8 (accented
+// vendor names, localized hostnames) is never split mid-rune — which would
+// emit a broken glyph and throw off the rune-based column widths.
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	if max <= 1 {
-		return s[:max]
+	if max == 1 {
+		return string(r[:1])
 	}
-	return s[:max-1] + "…"
+	return string(r[:max-1]) + "…"
 }
 
 func sum(xs []int) int {
