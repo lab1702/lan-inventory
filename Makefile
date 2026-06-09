@@ -25,8 +25,12 @@ clean:
 manuf-refresh:
 	@echo "Fetching Wireshark manuf database..."
 	@curl -sSfL https://www.wireshark.org/download/automated/data/manuf -o /tmp/manuf.raw
-	@echo "Filtering to 24-bit OUI entries..."
-	@grep -v '^#' /tmp/manuf.raw | grep -v '^$$' | grep -v '/' > internal/oui/manuf.txt
+	@echo "Stripping comments and blank lines..."
+	@# Keep every allocation: MA-L (/24), MA-M (/28) and MA-S (/36). The parser
+	@# does longest-prefix matching across all three widths, so we no longer
+	@# filter slash-masked rows. (We must not grep out '/' wholesale anyway:
+	@# ~289 /24 vendor names legitimately contain a slash, e.g. "... A/S".)
+	@grep -v '^#' /tmp/manuf.raw | grep -v '^$$' > internal/oui/manuf.txt
 	@rm -f /tmp/manuf.raw
 	@wc -l internal/oui/manuf.txt
 	@echo "Done. Review the diff and commit if it looks right."
