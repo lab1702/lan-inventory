@@ -108,7 +108,7 @@ func (m Model) deviceColumns() []deviceColumn {
 		{"Vendor", 12, func(d *model.Device) string { return d.Vendor }, false},
 		{"OS", 12, func(d *model.Device) string { return d.OSGuess }, false},
 		{"Ports", 22, func(d *model.Device) string { return portsCSV(d.OpenPorts) }, false},
-		{"RTT", 8, func(d *model.Device) string { return rttString(d.RTT) }, false},
+		{"RTT", 8, deviceRTTString, false},
 	}
 	for _, col := range optional {
 		if used+2+col.width <= m.width {
@@ -250,7 +250,7 @@ func (m Model) deviceDetailLines() []string {
 		ips = append(ips, ip.String())
 	}
 	content := fmt.Sprintf("IP: %s\nStatus: %s\nHostname: %s\nRTT: %s\n",
-		strings.Join(ips, ", "), d.Status.String(), d.Hostname, rttString(d.RTT))
+		strings.Join(ips, ", "), d.Status.String(), d.Hostname, deviceRTTString(d))
 	content += strings.Join(contentLines(detailStrip(d))[1:], "\n")
 	// Wrapping before vertical scrolling makes every field, including long
 	// names and service lists, readable even in a narrow terminal.
@@ -280,8 +280,18 @@ func portsCSV(ports []model.Port) string {
 }
 
 func rttString(d time.Duration) string {
-	if d <= 0 {
+	if d < 0 {
 		return "-"
 	}
+	if d == 0 {
+		return "0.0ms"
+	}
 	return d.Round(100 * time.Microsecond).String()
+}
+
+func deviceRTTString(d *model.Device) string {
+	if !d.HasRTT() {
+		return "-"
+	}
+	return rttString(d.RTT)
 }

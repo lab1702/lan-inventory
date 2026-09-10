@@ -116,3 +116,36 @@ func TestActiveEnrichesARPLearnedDuringSweep(t *testing.T) {
 		t.Fatal("host learned by ARP during sweep missed NBNS enrichment")
 	}
 }
+
+func TestSuccessfulZeroRTTUpdatesLatencyAndHistory(t *testing.T) {
+	ip := net.ParseIP("192.168.1.12")
+	m := NewMerger(MergerOptions{})
+	p := silentProbes()
+	w := &ActiveWorker{probes: p}
+	out := make(chan Update, 1)
+	for _, rtt := range []time.Duration{5 * time.Millisecond, 0, 0} {
+		p.ping = func(context.Context, string) (probe.PingResult, error) {
+			return probe.PingResult{Alive: true, RTT: rtt}, nil
+		}
+		w.probeOne(context.Background(), ip, false, out)
+		if len(out) != 1 {
+			t.Fatal("successful ping did not publish")
+		}
+		m.handleUpdate(<-out, nil)
+	}
+	d := m.Snapshot()[0]
+	if d.RTT != 0 || len(d.RTTHistory) != 3 || d.RTTHistory[0] != 5*time.Millisecond || d.RTTHistory[1] != 0 || d.RTTHistory[2] != 0 {
+		t.Fatalf("zero samples discarded: RTT=%v history=%v", d.RTT, d.RTTHistory)
+	}
+	p.ping = silentProbes().ping
+	p.tcpAlive = func(context.Context, string) bool { return true }
+	w.probeOne(context.Background(), ip, false, out)
+	if len(out) != 1 {
+		t.Fatal("TCP liveness did not publish")
+	}
+	m.handleUpdate(<-out, nil)
+	d = m.Snapshot()[0]
+	if d.RTT != 0 || len(d.RTTHistory) != 3 {
+		t.Fatalf("TCP liveness invented an RTT sample: %+v", d)
+	}
+}

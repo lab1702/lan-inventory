@@ -165,6 +165,7 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, isKnown bool, ou
 		IP:            ip,
 		Alive:         true,
 		RTT:           rtt,
+		RTTMeasured:   pingRes.Alive,
 		TTL:           ttl,
 		Hostname:      hostname,
 		OpenPorts:     ports,

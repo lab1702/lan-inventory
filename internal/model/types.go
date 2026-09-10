@@ -28,6 +28,13 @@ type Device struct {
 	NBNSResponded bool            `json:"nbns_responded,omitempty"`
 }
 
+// HasRTT reports whether an RTT has been measured. History distinguishes a
+// valid zero-duration reply from the zero value of an unmeasured device.
+// Positive RTTs remain valid for callers that do not supply history.
+func (d *Device) HasRTT() bool {
+	return d.RTT > 0 || len(d.RTTHistory) > 0
+}
+
 type Port struct {
 	Number  int    `json:"number"`
 	Proto   string `json:"proto"`

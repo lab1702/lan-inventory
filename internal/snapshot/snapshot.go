@@ -54,7 +54,7 @@ func WriteTable(w io.Writer, devices []*model.Device, color bool) error {
 			truncate(d.Hostname, 22),
 			truncate(d.OSGuess, 12),
 			truncate(ports, 22),
-			formatRTT(d.RTT),
+			formatRTT(d),
 			colorStatus(d.Status, color),
 		})
 	}
@@ -94,11 +94,14 @@ func portsCSV(ports []model.Port) string {
 	return strings.Join(parts, ",")
 }
 
-func formatRTT(d time.Duration) string {
-	if d <= 0 {
+func formatRTT(d *model.Device) string {
+	if !d.HasRTT() || d.RTT < 0 {
 		return "-"
 	}
-	return d.Round(100 * time.Microsecond).String()
+	if d.RTT == 0 {
+		return "0.0ms"
+	}
+	return d.RTT.Round(100 * time.Microsecond).String()
 }
 
 func colorStatus(s model.Status, color bool) string {

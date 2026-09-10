@@ -112,3 +112,23 @@ func TestEventTypeJSONRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceHasRTT(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		device model.Device
+		want   bool
+	}{
+		{"unmeasured", model.Device{}, false},
+		{"empty history", model.Device{RTTHistory: []time.Duration{}}, false},
+		{"positive without history", model.Device{RTT: time.Millisecond}, true},
+		{"measured zero", model.Device{RTTHistory: []time.Duration{0}}, true},
+		{"zero after positive", model.Device{RTTHistory: []time.Duration{time.Millisecond, 0}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.device.HasRTT(); got != tc.want {
+				t.Errorf("HasRTT() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

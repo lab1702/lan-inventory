@@ -308,7 +308,7 @@ func mergeUpdate(dev *model.Device, u Update) {
 			dev.Services[i] = s // refresh the instance's port and TXT data
 		}
 	}
-	if u.RTT > 0 {
+	if u.RTTMeasured || u.RTT > 0 {
 		dev.RTT = u.RTT
 		dev.RTTHistory = append(dev.RTTHistory, u.RTT)
 		if len(dev.RTTHistory) > 10 {
@@ -349,10 +349,8 @@ func mergeFromIPOnly(dst, src *model.Device) {
 			dst.Services = append(dst.Services, s)
 		}
 	}
-	if dst.RTT == 0 {
+	if !dst.HasRTT() {
 		dst.RTT = src.RTT
-	}
-	if len(dst.RTTHistory) == 0 {
 		dst.RTTHistory = src.RTTHistory
 	}
 	if src.FirstSeen.Before(dst.FirstSeen) || dst.FirstSeen.IsZero() {

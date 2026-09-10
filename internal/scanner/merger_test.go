@@ -440,3 +440,29 @@ func TestMergerPortsFollowEachAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestMergerRetainsMeasuredZeroRTTAcrossIdentityMigration(t *testing.T) {
+	for _, measuredMAC := range []bool{false, true} {
+		t.Run(fmt.Sprint(measuredMAC), func(t *testing.T) {
+			m := NewMerger(MergerOptions{})
+			mac := "02:00:00:00:00:01"
+			ip1, ip2 := net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.20")
+			if measuredMAC {
+				m.handleUpdate(Update{Source: "arp", MAC: mac, IP: ip1, Time: time.Now()}, nil)
+				m.handleUpdate(Update{Source: "active", IP: ip1, RTTMeasured: true, Time: time.Now()}, nil)
+				m.handleUpdate(Update{Source: "active", IP: ip2, RTT: 5 * time.Millisecond, RTTMeasured: true, Time: time.Now()}, nil)
+			} else {
+				m.handleUpdate(Update{Source: "active", IP: ip2, RTTMeasured: true, Time: time.Now()}, nil)
+			}
+			m.handleUpdate(Update{Source: "arp", MAC: mac, IP: ip2, Time: time.Now()}, nil)
+			devices := m.Snapshot()
+			if len(devices) != 1 {
+				t.Fatalf("migration duplicated device: %v", devices)
+			}
+			d := devices[0]
+			if d.RTT != 0 || len(d.RTTHistory) != 1 || d.RTTHistory[0] != 0 {
+				t.Fatalf("migration lost measured zero: RTT=%v history=%v", d.RTT, d.RTTHistory)
+			}
+		})
+	}
+}
