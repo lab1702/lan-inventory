@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/lab1702/lan-inventory/internal/model"
 )
 
@@ -33,7 +35,9 @@ func (m Model) viewServices() string {
 		key := padRight(styleAccent.Render(k), 22)
 		b.WriteString(fmt.Sprintf("%s  %d %s  →  %s\n", key, count, instLabel, hostList))
 	}
-	return b.String()
+	// Wrap before the viewport counts and slices physical lines. Otherwise
+	// terminal-width clipping permanently hides later hosts in each group.
+	return lipgloss.NewStyle().Width(max(1, m.width)).Render(strings.TrimSuffix(b.String(), "\n"))
 }
 
 // groupServices builds map[serviceType] = []hostLabel from the devices.

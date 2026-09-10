@@ -5,6 +5,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,11 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/lab1702/lan-inventory/internal/netiface"
 )
+
+func arpTestInfo() *netiface.Info {
+	_, subnet, _ := net.ParseCIDR("192.168.1.0/24")
+	return &netiface.Info{Name: "test0", Subnet: subnet}
+}
 
 type fakeARPCapture struct {
 	read      func() ([]byte, gopacket.CaptureInfo, error)
@@ -54,7 +60,7 @@ func TestARPCancellationOnQuietCapture(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		return nil, gopacket.CaptureInfo{}, pcap.NextErrorTimeoutExpired
 	}
-	worker := &ARPWorker{Iface: &netiface.Info{Name: "test0"}}
+	worker := &ARPWorker{Iface: arpTestInfo()}
 	result := make(chan error, 1)
 	var timeout time.Duration
 	go func() {
@@ -98,7 +104,7 @@ func TestARPErrorsReachCallerAndCloseCapture(t *testing.T) {
 			if stage == "filter" {
 				capture.filterErr = failure
 			}
-			worker := &ARPWorker{Iface: &netiface.Info{Name: "test0"}}
+			worker := &ARPWorker{Iface: arpTestInfo()}
 			err := worker.run(context.Background(), make(chan Update), func(*netiface.Info, time.Duration) (arpCapture, error) {
 				if stage == "open" {
 					return nil, failure
@@ -129,7 +135,7 @@ func TestARPEmitsPacketAndCancelsBlockedOutput(t *testing.T) {
 	capture := &fakeARPCapture{read: func() ([]byte, gopacket.CaptureInfo, error) {
 		return buffer.Bytes(), gopacket.CaptureInfo{}, nil
 	}}
-	worker := &ARPWorker{Iface: &netiface.Info{Name: "test0"}}
+	worker := &ARPWorker{Iface: arpTestInfo()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	out := make(chan Update)
@@ -153,5 +159,40 @@ func TestARPEmitsPacketAndCancelsBlockedOutput(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("capture did not stop with no output consumer")
+	}
+}
+
+func TestARPIgnoresOtherSubnetsOnSameInterface(t *testing.T) {
+	var packets [][]byte
+	mac := net.HardwareAddr{0, 0x11, 0x22, 0x33, 0x44, 0x55}
+	for _, ip := range []string{"192.168.2.10", "169.254.1.10", "192.168.1.10"} {
+		buf := gopacket.NewSerializeBuffer()
+		err := gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true},
+			&layers.Ethernet{SrcMAC: mac, DstMAC: net.HardwareAddr{255, 255, 255, 255, 255, 255}, EthernetType: layers.EthernetTypeARP},
+			&layers.ARP{AddrType: layers.LinkTypeEthernet, Protocol: layers.EthernetTypeIPv4, Operation: layers.ARPRequest,
+				SourceHwAddress: mac, SourceProtAddress: net.ParseIP(ip).To4(), DstHwAddress: make([]byte, 6), DstProtAddress: []byte{192, 168, 1, 1}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		packets = append(packets, buf.Bytes())
+	}
+	capture := &fakeARPCapture{read: func() ([]byte, gopacket.CaptureInfo, error) {
+		if len(packets) == 0 {
+			return nil, gopacket.CaptureInfo{}, io.EOF
+		}
+		packet := packets[0]
+		packets = packets[1:]
+		return packet, gopacket.CaptureInfo{}, nil
+	}}
+	out := make(chan Update, 3)
+	err := (&ARPWorker{Iface: arpTestInfo()}).run(context.Background(), out, func(*netiface.Info, time.Duration) (arpCapture, error) { return capture, nil })
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected end of fake capture, got %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("published %d updates, want only the in-subnet host", len(out))
+	}
+	if got := (<-out).IP.String(); got != "192.168.1.10" {
+		t.Fatalf("published out-of-subnet IP %s", got)
 	}
 }

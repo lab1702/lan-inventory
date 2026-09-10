@@ -100,8 +100,26 @@ func listenEvents(ch <-chan model.DeviceEvent) tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	previous := m.selectedIdentity()
 	next, cmd := m.update(msg)
+	_, snapshotTick := msg.(tickMsg)
+	identityLost := false
+	if (snapshotTick || next.filterBuf != m.filterBuf) && previous.valid() {
+		devices := filterDevices(next.devices, next.filterBuf)
+		sortDevices(devices)
+		if row := previous.find(devices); row >= 0 {
+			next.selectedRow = row
+		} else {
+			identityLost = true
+			// A removed or filtered-out device cannot remain open under
+			// another device's identity. Return to the nearest list row.
+			next.showDeviceDetails = false
+		}
+	}
 	next.clampViewport()
+	if identityLost || !previous.matches(next.selectedIdentity()) {
+		next.detailScroll = 0
+	}
 	return next, cmd
 }
 

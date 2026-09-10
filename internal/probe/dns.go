@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// ReverseDNS does a PTR lookup for ip via the system default resolver and
+// ReverseDNS does a PTR lookup for ip using the system DNS configuration and
 // returns the first result, with the trailing dot trimmed. Returns "" on
 // timeout, no result, or any error.
 func ReverseDNS(ctx context.Context, ip string) string {
-	resolver := net.DefaultResolver
+	resolver := reverseDNSResolver()
 	names, err := resolver.LookupAddr(ctx, ip)
 	if err != nil || len(names) == 0 {
 		return ""
@@ -74,14 +74,14 @@ func ReverseDNSMDNS(ctx context.Context, ip string) string {
 // chain is bounded by the sum of probe timeouts even on dead hosts.
 //
 // Order:
-//   1. system rDNS
-//   2. gateway-as-resolver (if gatewayIP is non-nil)
-//   3. NBNS (UDP 137)
-//   4. mDNS reverse (UDP 5353 unicast)
+//  1. system rDNS
+//  2. gateway-as-resolver (if gatewayIP is non-nil)
+//  3. NBNS (UDP 137)
+//  4. mDNS reverse (UDP 5353 unicast)
 func ResolveHostname(ctx context.Context, ip string, gatewayIP net.IP) string {
-	// Bound step 1 explicitly. net.DefaultResolver honors ctx, but the caller's
-	// ctx may carry no deadline (TUI mode), and a hung system resolver would
-	// otherwise stall the whole chain — contrary to this function's contract.
+	// Bound step 1 explicitly; the caller may carry no deadline (TUI mode).
+	// On Windows reverseDNSResolver uses cancellable Go DNS queries because
+	// the native PTR lookup can block inside DnsQuery beyond this deadline.
 	rctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	name := ReverseDNS(rctx, ip)
 	cancel()

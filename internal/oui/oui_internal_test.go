@@ -20,6 +20,11 @@ func TestBuildTablesLongestPrefixMatch(t *testing.T) {
 	short, long, nibbles := buildTables(strings.NewReader(synthManuf))
 
 	// Swap in the synthetic tables for the lookup helpers.
+	once.Do(loadTable)
+	originalShort, originalLong, originalMasks := shortByPrefix, longByPrefix, maskNibbles
+	t.Cleanup(func() {
+		shortByPrefix, longByPrefix, maskNibbles = originalShort, originalLong, originalMasks
+	})
 	shortByPrefix, longByPrefix, maskNibbles = short, long, nibbles
 
 	cases := []struct {

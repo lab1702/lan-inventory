@@ -50,8 +50,8 @@ func (w *ARPWorker) Run(ctx context.Context, out chan<- Update) error {
 }
 
 func (w *ARPWorker) run(ctx context.Context, out chan<- Update, open func(*netiface.Info, time.Duration) (arpCapture, error)) error {
-	if w.Iface == nil {
-		return fmt.Errorf("ARP interface is required")
+	if w.Iface == nil || w.Iface.Subnet == nil {
+		return fmt.Errorf("ARP interface and subnet are required")
 	}
 	if ctx.Err() != nil {
 		return nil
@@ -85,10 +85,11 @@ func (w *ARPWorker) run(ctx context.Context, out chan<- Update, open func(*netif
 			continue
 		}
 		mac := net.HardwareAddr(arp.SourceHwAddress).String()
-		ip := append(net.IP{}, arp.SourceProtAddress...)
-		if mac == "" || ip == nil || ip.IsUnspecified() {
+		ip := net.IP(arp.SourceProtAddress).To4()
+		if mac == "" || ip == nil || ip.IsUnspecified() || !w.Iface.Subnet.Contains(ip) {
 			continue
 		}
+		ip = append(net.IP(nil), ip...)
 		update := Update{
 			Source: "arp",
 			Time:   time.Now(),
