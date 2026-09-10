@@ -34,7 +34,7 @@ type arpRow struct {
 }
 
 // rowsToUpdates filters arpRows by interface index and subnet
-// membership, drops zero-length / all-zero MACs, and emits one Update
+// membership, drops non-unicast neighbors, and emits one Update
 // per survivor. Shape matches parseProcNetARP and the Windows
 // rowsToUpdates exactly: Source "arp-seed", lowercase MAC, vendor
 // populated from the bundled OUI table.
@@ -44,14 +44,8 @@ func rowsToUpdates(rows []arpRow, ifaceIndex int, subnet *net.IPNet, now time.Ti
 		if r.IfaceIndex != ifaceIndex {
 			continue
 		}
-		if len(r.MAC) != 6 {
-			continue
-		}
-		if isZeroMAC(r.MAC) {
-			continue
-		}
 		ip4 := r.IP.To4()
-		if ip4 == nil || !subnet.Contains(ip4) {
+		if !usableARPNeighbor(ip4, r.MAC, subnet) {
 			continue
 		}
 		mac := strings.ToLower(r.MAC.String())
@@ -64,15 +58,6 @@ func rowsToUpdates(rows []arpRow, ifaceIndex int, subnet *net.IPNet, now time.Ti
 		})
 	}
 	return out
-}
-
-func isZeroMAC(mac net.HardwareAddr) bool {
-	for _, b := range mac {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // extractARPRows pulls per-neighbor entries out of parsed route

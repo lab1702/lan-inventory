@@ -128,3 +128,45 @@ func TestParseProcNetARP_PopulatesVendor(t *testing.T) {
 		t.Errorf("expected non-empty Vendor for known OUI 08:3a:8d, got empty")
 	}
 }
+
+func TestUsableARPNeighbor(t *testing.T) {
+	for _, tc := range []struct {
+		name, cidr, ip, mac string
+		want                bool
+	}{
+		{"host", "192.168.1.0/24", "192.168.1.10", "02:00:00:00:00:01", true},
+		{"link local host", "169.254.0.0/16", "169.254.1.10", "02:00:00:00:00:01", true},
+		{"broadcast MAC", "192.168.1.0/24", "192.168.1.10", "ff:ff:ff:ff:ff:ff", false},
+		{"group MAC", "192.168.1.0/24", "192.168.1.10", "01:00:5e:00:00:01", false},
+		{"zero MAC", "192.168.1.0/24", "192.168.1.10", "00:00:00:00:00:00", false},
+		{"EUI64", "192.168.1.0/24", "192.168.1.10", "02:00:00:00:00:00:00:01", false},
+		{"broadcast IP", "192.168.1.0/24", "192.168.1.255", "02:00:00:00:00:01", false},
+		{"network IP", "192.168.1.0/24", "192.168.1.0", "02:00:00:00:00:01", false},
+		{"outside subnet", "192.168.1.0/24", "192.168.2.10", "02:00:00:00:00:01", false},
+		{"multicast IP", "224.0.0.0/24", "224.0.0.1", "02:00:00:00:00:01", false},
+		{"lower peer", "192.168.1.0/31", "192.168.1.0", "02:00:00:00:00:01", true},
+		{"upper peer", "192.168.1.0/31", "192.168.1.1", "02:00:00:00:00:01", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mac, err := net.ParseMAC(tc.mac)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := usableARPNeighbor(net.ParseIP(tc.ip), mac, mustCIDR(t, tc.cidr)); got != tc.want {
+				t.Fatalf("usable = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseProcNetARP_ExcludesGroupNeighbors(t *testing.T) {
+	in := `IP address HW type Flags HW address Mask Device
+192.168.1.255 0x1 0x6 ff:ff:ff:ff:ff:ff * eth0
+192.168.1.0 0x1 0x6 02:00:00:00:00:01 * eth0
+192.168.1.10 0x1 0x6 02:00:00:00:00:01 * eth0
+`
+	got := parseProcNetARP(strings.NewReader(in), "eth0", mustCIDR(t, "192.168.1.0/24"), time.Now())
+	if len(got) != 1 || got[0].IP.String() != "192.168.1.10" {
+		t.Fatalf("neighbors = %+v", got)
+	}
+}

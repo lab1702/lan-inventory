@@ -7,12 +7,14 @@ import (
 	"net"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/lab1702/lan-inventory/internal/model"
 )
 
 // viewSubnet renders the live subnet as a grid. For a /24, 16×16. For smaller
-// subnets the grid auto-shrinks. For larger subnets up to /22, multiple /24
-// blocks are stacked vertically.
+// subnets the grid auto-shrinks; larger subnets up to /22 use a wider grid.
+// Narrow terminals reduce the columns and add rows, preserving every address.
 func (m Model) viewSubnet() string {
 	_, subnet, err := net.ParseCIDR(m.deps.Subnet)
 	if err != nil || subnet == nil {
@@ -36,21 +38,23 @@ func (m Model) viewSubnet() string {
 		return "(subnet too large to render)"
 	}
 	hostBits := 32 - ones
-	gridSide := 1 << (hostBits / 2)
-	if gridSide < 1 {
-		gridSide = 1
-	}
-	gridOther := 1 << (hostBits - hostBits/2)
+	hostCount := 1 << hostBits
+	gridSide := min(1<<(hostBits/2), max(1, m.width))
+	gridOther := (hostCount + gridSide - 1) / gridSide
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Subnet %s — %d hosts\n", m.deps.Subnet, 1<<hostBits))
-	b.WriteString(styleDim.Render("Legend: ● online · stale x offline _ unseen"))
+	intro := fmt.Sprintf("Subnet %s — %d hosts\n", m.deps.Subnet, hostCount) +
+		styleDim.Render("Legend: ● online · stale x offline _ unseen")
+	b.WriteString(lipgloss.NewStyle().Width(max(1, m.width)).Render(intro))
 	b.WriteString("\n\n")
 
 	base := subnet.IP.Mask(subnet.Mask).To4()
 	for row := 0; row < gridOther; row++ {
 		for col := 0; col < gridSide; col++ {
 			offset := row*gridSide + col
+			if offset >= hostCount {
+				break
+			}
 			ip := make(net.IP, 4)
 			copy(ip, base)
 			carry := offset

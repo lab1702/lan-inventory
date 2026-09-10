@@ -42,26 +42,9 @@ func rowsToUpdates(rows []arpRow, ifaceIndex uint32, subnet *net.IPNet, now time
 		if !r.Reachable {
 			continue
 		}
-		if len(r.MAC) != 6 {
-			continue
-		}
-		if isZeroMAC(r.MAC) || r.MAC[0]&1 != 0 {
-			continue
-		}
 		ip4 := r.IP.To4()
-		if ip4 == nil || !ip4.IsGlobalUnicast() || !subnet.Contains(ip4) {
+		if !usableARPNeighbor(ip4, r.MAC, subnet) {
 			continue
-		}
-		ones, _ := subnet.Mask.Size()
-		if ones < 31 {
-			network := subnet.IP.Mask(subnet.Mask).To4()
-			broadcast := make(net.IP, net.IPv4len)
-			for i := range broadcast {
-				broadcast[i] = network[i] | ^subnet.Mask[i]
-			}
-			if ip4.Equal(network) || ip4.Equal(broadcast) {
-				continue
-			}
 		}
 		mac := strings.ToLower(r.MAC.String())
 		out = append(out, Update{
@@ -73,15 +56,6 @@ func rowsToUpdates(rows []arpRow, ifaceIndex uint32, subnet *net.IPNet, now time
 		})
 	}
 	return out
-}
-
-func isZeroMAC(mac net.HardwareAddr) bool {
-	for _, b := range mac {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // MIB_IPNET_ROW2 layout per Win32 (subset; only the fields we consume

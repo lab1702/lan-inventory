@@ -250,7 +250,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		// Follow incoming events at the top; preserve the reader's position
 		// when they have scrolled into older events.
 		if m.scrollRows[tabEvents] > 0 {
-			m.scrollRows[tabEvents]++
+			m.scrollRows[tabEvents] += len(contentLines(m.renderEvent(evt)))
 		}
 		if len(m.events) > 200 {
 			m.events = m.events[:200]

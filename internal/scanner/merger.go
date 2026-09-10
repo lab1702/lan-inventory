@@ -41,6 +41,7 @@ type Merger struct {
 	byMAC          map[string]*model.Device
 	byIP           map[string]*model.Device // for MAC-less entries
 	hostnameSource map[*model.Device]string
+	portsByIP      map[string][]model.Port
 }
 
 // NewMerger constructs an idle merger; call Run to start consuming updates.
@@ -51,6 +52,7 @@ func NewMerger(opts MergerOptions) *Merger {
 		byMAC:          make(map[string]*model.Device),
 		byIP:           make(map[string]*model.Device),
 		hostnameSource: make(map[*model.Device]string),
+		portsByIP:      make(map[string][]model.Port),
 	}
 }
 
@@ -139,6 +141,8 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 				for i := len(other.IPs) - 1; i >= 0; i-- {
 					if other.IPs[i].Equal(u.IP) {
 						other.IPs = append(other.IPs[:i], other.IPs[i+1:]...)
+						delete(m.portsByIP, ipKey)
+						m.refreshPorts(other)
 					}
 				}
 			}
@@ -185,6 +189,12 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 		m.hostnameSource[dev] = u.Source
 	}
 	mergeUpdate(dev, u)
+	// Each active update describes one address, including an empty scan.
+	// Retain the other addresses' latest results when refreshing this one.
+	if ipKey != "" && (u.Source == "active" || u.OpenPorts != nil) {
+		m.portsByIP[ipKey] = append([]model.Port(nil), u.OpenPorts...)
+	}
+	m.refreshPorts(dev)
 	if u.Source == "arp-seed" {
 		return // cached identity is neither a fresh sighting nor a Joined event
 	}
@@ -251,7 +261,33 @@ func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- mode
 	}
 }
 
-// mergeUpdate applies non-zero fields of u onto dev.
+// refreshPorts derives a device's ports from the latest scan of each owned IP.
+func (m *Merger) refreshPorts(dev *model.Device) {
+	type portKey struct {
+		number int
+		proto  string
+	}
+	seen := make(map[portKey]bool)
+	dev.OpenPorts = nil
+	for _, ip := range dev.IPs {
+		for _, port := range m.portsByIP[ip.String()] {
+			key := portKey{port.Number, port.Proto}
+			if !seen[key] {
+				dev.OpenPorts = append(dev.OpenPorts, port)
+				seen[key] = true
+			}
+		}
+	}
+	sort.Slice(dev.OpenPorts, func(i, j int) bool {
+		if dev.OpenPorts[i].Number == dev.OpenPorts[j].Number {
+			return dev.OpenPorts[i].Proto < dev.OpenPorts[j].Proto
+		}
+		return dev.OpenPorts[i].Number < dev.OpenPorts[j].Number
+	})
+	dev.OSGuess = probe.OSDetect(dev, dev.NBNSResponded)
+}
+
+// mergeUpdate applies observation fields of u onto dev; ports are merged by IP.
 func mergeUpdate(dev *model.Device, u Update) {
 	if u.IP != nil {
 		if !containsIP(dev.IPs, u.IP) {
@@ -263,15 +299,6 @@ func mergeUpdate(dev *model.Device, u Update) {
 	}
 	if u.Vendor != "" {
 		dev.Vendor = u.Vendor
-	}
-	// The active prober reports the full current port set on every sweep, so
-	// an empty (nil) result means "all ports closed" and must clear stale
-	// entries. Other sources (arp/mdns) never scan ports, so a nil OpenPorts
-	// from them carries no information and must not wipe the existing set.
-	if u.Source == "active" {
-		dev.OpenPorts = u.OpenPorts
-	} else if u.OpenPorts != nil {
-		dev.OpenPorts = u.OpenPorts
 	}
 	for _, s := range u.Services {
 		i := serviceIndex(dev.Services, s)
@@ -303,8 +330,6 @@ func mergeUpdate(dev *model.Device, u Update) {
 	if dev.FirstSeen.IsZero() {
 		dev.FirstSeen = u.Time
 	}
-	sort.Slice(dev.OpenPorts, func(i, j int) bool { return dev.OpenPorts[i].Number < dev.OpenPorts[j].Number })
-	dev.OSGuess = probe.OSDetect(dev, dev.NBNSResponded)
 }
 
 func mergeFromIPOnly(dst, src *model.Device) {
@@ -318,9 +343,6 @@ func mergeFromIPOnly(dst, src *model.Device) {
 	}
 	if dst.OSGuess == "" {
 		dst.OSGuess = src.OSGuess
-	}
-	if len(dst.OpenPorts) == 0 {
-		dst.OpenPorts = src.OpenPorts
 	}
 	for _, s := range src.Services {
 		if serviceIndex(dst.Services, s) < 0 {

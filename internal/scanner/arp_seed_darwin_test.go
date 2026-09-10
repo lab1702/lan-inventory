@@ -155,3 +155,20 @@ func TestExtractARPRows_FiltersNonRouteMessage(t *testing.T) {
 		t.Errorf("expected non-RouteMessage filtered, got %d rows", len(rows))
 	}
 }
+
+func TestRowsToUpdates_ExcludesBroadcastNeighbors(t *testing.T) {
+	mac := net.HardwareAddr{2, 0, 0, 0, 0, 1}
+	rows := []arpRow{
+		{IfaceIndex: 7, IP: net.IPv4(192, 168, 1, 255), MAC: net.HardwareAddr{255, 255, 255, 255, 255, 255}},
+		{IfaceIndex: 7, IP: net.IPv4(192, 168, 1, 0), MAC: mac},
+		{IfaceIndex: 7, IP: net.IPv4(192, 168, 1, 1), MAC: mac},
+	}
+	got := rowsToUpdates(rows, 7, mustCIDRDarwin(t, "192.168.1.0/24"), time.Now())
+	if len(got) != 1 || got[0].IP.String() != "192.168.1.1" {
+		t.Fatalf("neighbors = %+v", got)
+	}
+	got = rowsToUpdates(rows, 7, mustCIDRDarwin(t, "192.168.1.0/31"), time.Now())
+	if len(got) != 2 {
+		t.Fatalf("lost /31 peers: %+v", got)
+	}
+}

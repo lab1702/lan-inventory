@@ -391,3 +391,52 @@ func TestMergerRefreshesServicePortAndTXT(t *testing.T) {
 		t.Fatalf("service data stayed stale or duplicated: %+v", got)
 	}
 }
+
+func TestMergerPortsFollowEachAddress(t *testing.T) {
+	for _, macFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("macFirst=%v", macFirst), func(t *testing.T) {
+			m := NewMerger(MergerOptions{})
+			ip1, ip2 := net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.20")
+			mac := "02:00:00:00:00:01"
+			arp := func(ip net.IP) { m.handleUpdate(Update{Source: "arp", IP: ip, MAC: mac, Time: time.Now()}, nil) }
+			scan := func(ip net.IP, ports ...model.Port) {
+				m.handleUpdate(Update{Source: "active", IP: ip, OpenPorts: ports, Time: time.Now()}, nil)
+			}
+			ssh := model.Port{Number: 22, Proto: "tcp", Service: "ssh"}
+			http := model.Port{Number: 80, Proto: "tcp", Service: "http"}
+			if macFirst {
+				arp(ip1)
+				arp(ip2)
+			}
+			scan(ip1, http, ssh)
+			scan(ip2, ssh)
+			if !macFirst {
+				arp(ip2)
+				arp(ip1)
+			}
+			devices := m.Snapshot()
+			if len(devices) != 1 || len(devices[0].OpenPorts) != 2 || devices[0].OpenPorts[0] != ssh || devices[0].OpenPorts[1] != http {
+				t.Fatalf("combined ports after discovery: %+v", devices)
+			}
+			scan(ip2)
+			if ports := m.Snapshot()[0].OpenPorts; len(ports) != 2 {
+				t.Fatalf("closed alias erased another IP's ports: %v", ports)
+			}
+			scan(ip1, http)
+			if ports := m.Snapshot()[0].OpenPorts; len(ports) != 1 || ports[0] != http {
+				t.Fatalf("closed port retained: %v", ports)
+			}
+			scan(ip2, ssh)
+			m.handleUpdate(Update{Source: "arp", IP: ip1, MAC: "02:00:00:00:00:02", Time: time.Now()}, nil)
+			for _, d := range m.Snapshot() {
+				if d.MAC == mac {
+					if len(d.OpenPorts) != 1 || d.OpenPorts[0] != ssh {
+						t.Fatalf("old owner retained reassigned IP ports: %v", d.OpenPorts)
+					}
+				} else if len(d.OpenPorts) != 0 {
+					t.Fatalf("new owner inherited old IP ports: %v", d.OpenPorts)
+				}
+			}
+		})
+	}
+}
