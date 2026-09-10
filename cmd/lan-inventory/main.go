@@ -76,7 +76,7 @@ func main() {
 }
 
 func runOnce(iface *netiface.Info, asTable bool) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := signalContext()
 	defer cancel()
 
 	scn := scanner.New(scanner.Config{Iface: iface})
@@ -86,22 +86,12 @@ func runOnce(iface *netiface.Info, asTable bool) int {
 		}
 		close(doneEvents)
 	}()
-	go scn.Run(ctx)
-
-	// Spec: "starts ARP and mDNS listeners, waits 8 seconds for passive
-	// signals, runs one full active sweep, snapshots, and exits." The
-	// ActiveWorker kicks off its initial sweep on Run(); a full /24 sweep
-	// with 32 workers and 1 s per-host ping timeout takes up to ~15 s for
-	// fully dead subnets. We give the whole thing 20 s of wall time, which
-	// covers passive warmup + active sweep on typical home LANs.
-	timer := time.NewTimer(20 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
-	cancel()
+	err := scn.RunOnce(ctx)
 	<-doneEvents
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lan-inventory: %v\n", err)
+		return exitRuntime
+	}
 
 	devices := scn.Snapshot()
 	if len(devices) == 0 {
@@ -134,21 +124,32 @@ func runTUI(iface *netiface.Info) int {
 	defer cancel()
 
 	scn := scanner.New(scanner.Config{Iface: iface})
-	go scn.Run(ctx)
 
 	deps := tui.Deps{
 		Subnet:   iface.Subnet.String(),
 		Iface:    iface.Name,
 		Snapshot: scn.Snapshot,
 		Events:   func() <-chan model.DeviceEvent { return scn.Events() },
-		OnRescan: func() { go scn.TriggerSweep(ctx) },
+		OnRescan: func() { scn.TriggerSweep(ctx) },
 	}
-	prog := tea.NewProgram(tui.NewModel(deps), tea.WithAltScreen())
-	if _, err := prog.Run(); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return exitOK
+	prog := tea.NewProgram(tui.NewModel(deps), tea.WithAltScreen(), tea.WithContext(ctx))
+	scanDone := make(chan error, 1)
+	go func() {
+		err := scn.Run(ctx)
+		scanDone <- err
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cancel()
 		}
-		fmt.Fprintf(os.Stderr, "lan-inventory: %v\n", err)
+	}()
+	_, uiErr := prog.Run()
+	cancel()
+	scanErr := <-scanDone
+	if scanErr != nil && !errors.Is(scanErr, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "lan-inventory: %v\n", scanErr)
+		return exitRuntime
+	}
+	if uiErr != nil && !errors.Is(uiErr, tea.ErrProgramKilled) && !errors.Is(uiErr, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "lan-inventory: %v\n", uiErr)
 		return exitRuntime
 	}
 	return exitOK

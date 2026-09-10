@@ -2,10 +2,8 @@
 
 //go:build windows
 
-// Package netiface — Windows route resolver. We pick the operational
-// adapter with the lowest IPv4 metric whose adapter advertises a
-// non-empty gateway list. That matches the Linux semantics of "default
-// route with the lowest metric".
+// Package netiface — Windows route resolver. We pick an operational
+// adapter with an IPv4 default route, using the route plus interface metric.
 package netiface
 
 import (
@@ -23,7 +21,7 @@ import (
 type gatewayCandidate struct {
 	IfaceIndex uint32
 	Gateway    net.IP
-	Metric     uint32
+	Metric     uint64
 }
 
 // pickBestGatewayCandidate returns the candidate with the lowest Metric.
@@ -41,9 +39,8 @@ func pickBestGatewayCandidate(cands []gatewayCandidate) (*gatewayCandidate, erro
 	return best, nil
 }
 
-// defaultRouteInterface enumerates Windows adapters via GetAdaptersAddresses,
-// collects every operational IPv4 adapter that has at least one gateway,
-// and returns the one with the lowest Ipv4Metric.
+// defaultRouteInterface returns the operational IPv4 default-route interface
+// with the lowest effective metric and that route's next-hop gateway.
 func defaultRouteInterface() (*net.Interface, net.IP, error) {
 	cands, err := collectGatewayCandidates()
 	if err != nil {
@@ -60,55 +57,65 @@ func defaultRouteInterface() (*net.Interface, net.IP, error) {
 	return iface, best.Gateway, nil
 }
 
-// collectGatewayCandidates calls GetAdaptersAddresses with
-// GAA_FLAG_INCLUDE_GATEWAYS and returns one candidate per operational
-// adapter that has at least one IPv4 gateway. The adapter's Ipv4Metric is
-// captured as Metric so pickBestGatewayCandidate can choose the default
-// route.
+// collectGatewayCandidates joins actual IPv4 routes from GetIpForwardTable2
+// with adapter state and metrics from GetAdaptersAddresses. A configured
+// adapter gateway alone does not establish that a default route exists.
 func collectGatewayCandidates() ([]gatewayCandidate, error) {
-	const flags = windows.GAA_FLAG_INCLUDE_GATEWAYS |
-		windows.GAA_FLAG_SKIP_ANYCAST |
+	const flags = windows.GAA_FLAG_SKIP_ANYCAST |
 		windows.GAA_FLAG_SKIP_MULTICAST |
 		windows.GAA_FLAG_SKIP_DNS_SERVER
 
-	// Probe size, then allocate.
-	var bufLen uint32
-	err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, flags, 0, nil, &bufLen)
-	if err != windows.ERROR_BUFFER_OVERFLOW {
-		return nil, fmt.Errorf("GetAdaptersAddresses (size probe): %w", err)
+	// Start with the recommended buffer size and tolerate adapter changes
+	// that increase the required allocation between calls.
+	bufLen := uint32(15 * 1024)
+	var first *windows.IpAdapterAddresses
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		buf := make([]byte, bufLen)
+		first = (*windows.IpAdapterAddresses)(unsafe.Pointer(&buf[0]))
+		err = windows.GetAdaptersAddresses(windows.AF_INET, flags, 0, first, &bufLen)
+		if err != windows.ERROR_BUFFER_OVERFLOW {
+			break
+		}
 	}
-	buf := make([]byte, bufLen)
-	first := (*windows.IpAdapterAddresses)(unsafe.Pointer(&buf[0]))
-	if err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, flags, 0, first, &bufLen); err != nil {
+	if err != nil {
 		return nil, fmt.Errorf("GetAdaptersAddresses: %w", err)
 	}
 
-	var cands []gatewayCandidate
-	for aa := first; aa != nil; aa = aa.Next {
-		if aa.OperStatus != windows.IfOperStatusUp {
-			continue
-		}
-		gw := firstIPv4Gateway(aa)
-		if gw == nil {
-			continue
-		}
-		cands = append(cands, gatewayCandidate{
-			IfaceIndex: aa.IfIndex,
-			Gateway:    gw,
-			Metric:     aa.Ipv4Metric,
-		})
+	var table *windows.MibIpForwardTable2
+	if err := windows.GetIpForwardTable2(windows.AF_INET, &table); err != nil {
+		return nil, fmt.Errorf("GetIpForwardTable2: %w", err)
 	}
-	return cands, nil
+	defer windows.FreeMibTable(unsafe.Pointer(table))
+	return gatewayCandidatesFromRoutes(table.Rows(), first), nil
 }
 
-// firstIPv4Gateway returns the first IPv4 address found in the adapter's
-// linked list of gateway addresses, or nil if there is none.
-func firstIPv4Gateway(aa *windows.IpAdapterAddresses) net.IP {
-	for ga := aa.FirstGatewayAddress; ga != nil; ga = ga.Next {
-		ip := ga.Address.IP()
-		if ip4 := ip.To4(); ip4 != nil {
-			return ip4
+func gatewayCandidatesFromRoutes(routes []windows.MibIpForwardRow2, first *windows.IpAdapterAddresses) []gatewayCandidate {
+	metrics := make(map[uint32]uint32)
+	for aa := first; aa != nil; aa = aa.Next {
+		if aa.OperStatus == windows.IfOperStatusUp {
+			metrics[aa.IfIndex] = aa.Ipv4Metric
 		}
 	}
-	return nil
+	var cands []gatewayCandidate
+	for _, route := range routes {
+		metric, up := metrics[route.InterfaceIndex]
+		if !up || route.Loopback != 0 || route.ValidLifetime == 0 ||
+			route.DestinationPrefix.PrefixLength != 0 || route.DestinationPrefix.Prefix.Family != windows.AF_INET ||
+			route.NextHop.Family != windows.AF_INET {
+			continue
+		}
+		prefix := (*windows.RawSockaddrInet4)(unsafe.Pointer(&route.DestinationPrefix.Prefix))
+		if prefix.Addr != [4]byte{} {
+			continue
+		}
+		nextHop := (*windows.RawSockaddrInet4)(unsafe.Pointer(&route.NextHop))
+		cands = append(cands, gatewayCandidate{
+			IfaceIndex: route.InterfaceIndex,
+			Gateway:    net.IPv4(nextHop.Addr[0], nextHop.Addr[1], nextHop.Addr[2], nextHop.Addr[3]),
+			// Windows ranks routes using the sum, not either metric alone.
+			Metric: uint64(metric) + uint64(route.Metric),
+		})
+	}
+	return cands
 }

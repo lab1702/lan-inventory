@@ -19,6 +19,16 @@ scripts and cron.
 
 ### Linux
 
+Install Go, a C compiler, and the libpcap development headers before building.
+For Debian/Ubuntu, the native prerequisites are:
+
+```bash
+sudo apt-get update
+sudo apt-get install build-essential libpcap-dev libcap2-bin
+```
+
+Then install the binary and grant raw-socket access:
+
 ```bash
 go install github.com/lab1702/lan-inventory/cmd/lan-inventory@latest
 sudo setcap cap_net_raw,cap_net_admin=eip $(which lan-inventory)
@@ -86,7 +96,9 @@ lan-inventory --version
 ### TUI keys
 
 - `1`–`4` switch tabs (Devices / Services / Subnet / Events)
-- `↑/↓` or `j/k` navigate
+- `↑/↓` or `j/k` select devices or scroll the current tab
+- `PgUp/PgDn` move one page; `Home/End` move to the first/last row
+- `Home` in Events returns to the newest events
 - `/` filter (Enter or Esc exits filter input; clear with Backspace)
 - `r` force a rescan
 - `q`, `Esc`, or `Ctrl+C` quit

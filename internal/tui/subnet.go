@@ -59,7 +59,11 @@ func (m Model) viewSubnet() string {
 				ip[i] = byte(sum & 0xff)
 				carry = sum >> 8
 			}
-			b.WriteString(coloredGlyph(statusByLast[ip.String()]))
+			if status, seen := statusByLast[ip.String()]; seen {
+				b.WriteString(coloredGlyph(status))
+			} else {
+				b.WriteString(styleDim.Render("_"))
+			}
 		}
 		b.WriteString("\n")
 	}

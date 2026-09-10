@@ -4,6 +4,7 @@ package probe
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"strings"
 	"time"
@@ -72,7 +73,9 @@ func NBNS(ctx context.Context, ip string) string {
 	if _, err := conn.Write(nbnsQuery); err != nil {
 		return ""
 	}
-	buf := make([]byte, 512)
+	// A status reply can contain up to 255 names, each 18 bytes, plus
+	// statistics and encoded names. Preserve the whole record for validation.
+	buf := make([]byte, 8192)
 	n, err := conn.Read(buf)
 	if err != nil {
 		return ""
@@ -81,37 +84,55 @@ func NBNS(ctx context.Context, ip string) string {
 }
 
 // parseNBNSResponse extracts the first non-group Workstation name from an
-// NBNS Node Status Response. Layout:
-//
-//	[0..12)   header
-//	[12..50)  question section (echoes our 38-byte question)
-//	[50..62)  answer section header (name ptr + type + class + TTL + RDLENGTH)
-//	[62]      NUM_NAMES
-//	[63..)    NAME_RECORDS, each 18 bytes:
-//	             15 bytes name (space-padded)
-//	              1 byte suffix type (0x00 = Workstation/Redirector)
-//	              2 bytes flags (top bit of first byte = group)
-//
-// A valid response is at least 12 + 38 + 12 + 1 + 18 = 81 bytes.
+// NBNS Node Status Response. RFC 1002 responses have no question section;
+// some implementations echo the question and compress the answer name.
 func parseNBNSResponse(buf []byte) string {
-	const minLen = 81
-	if len(buf) < minLen {
+	if len(buf) < 12 || binary.BigEndian.Uint16(buf[:2]) != binary.BigEndian.Uint16(nbnsQuery[:2]) {
 		return ""
 	}
-	numNames := int(buf[62])
-	if numNames == 0 {
+	flags := binary.BigEndian.Uint16(buf[2:4])
+	// Require a successful, untruncated standard response to our query.
+	if flags&0x8000 == 0 || flags&0x7800 != 0 || flags&0x0200 != 0 || flags&0x000f != 0 {
 		return ""
 	}
-	const recBase = 63
-	const recSize = 18
-	for i := 0; i < numNames; i++ {
-		off := recBase + i*recSize
-		if off+recSize > len(buf) {
-			break
+	questions := binary.BigEndian.Uint16(buf[4:6])
+	if questions > 1 || binary.BigEndian.Uint16(buf[6:8]) != 1 ||
+		binary.BigEndian.Uint16(buf[8:10]) != 0 || binary.BigEndian.Uint16(buf[10:12]) != 0 {
+		return ""
+	}
+	off := 12
+	if questions == 1 {
+		var ok bool
+		off, ok = skipNBNSName(buf, off)
+		if !ok || off+4 > len(buf) || binary.BigEndian.Uint16(buf[off:off+2]) != 0x21 ||
+			binary.BigEndian.Uint16(buf[off+2:off+4]) != 1 {
+			return ""
 		}
-		nameBytes := buf[off : off+15]
-		suffix := buf[off+15]
-		flagsHigh := buf[off+16]
+		off += 4
+	}
+	off, ok := skipNBNSName(buf, off)
+	if !ok || off+10 > len(buf) || binary.BigEndian.Uint16(buf[off:off+2]) != 0x21 ||
+		binary.BigEndian.Uint16(buf[off+2:off+4]) != 1 {
+		return ""
+	}
+	rdlen := int(binary.BigEndian.Uint16(buf[off+8 : off+10]))
+	off += 10
+	if rdlen < 1 || rdlen != len(buf)-off {
+		return ""
+	}
+	rdata := buf[off:]
+	numNames := int(rdata[0])
+	const recSize = 18
+	// Validate every declared name and the 46-byte statistics block before
+	// returning any name, including when the first record would match.
+	if len(rdata) != 1+numNames*recSize+46 {
+		return ""
+	}
+	for i := 0; i < numNames; i++ {
+		off := 1 + i*recSize
+		nameBytes := rdata[off : off+15]
+		suffix := rdata[off+15]
+		flagsHigh := rdata[off+16]
 		// Suffix 0x00 is Workstation/Redirector — the actual machine name.
 		if suffix != 0x00 {
 			continue
@@ -127,6 +148,57 @@ func parseNBNSResponse(buf []byte) string {
 		return name
 	}
 	return ""
+}
+
+// skipNBNSName validates an encoded NetBIOS name and any scope labels,
+// following backward compression pointers with a bounded traversal.
+func skipNBNSName(buf []byte, off int) (int, bool) {
+	next, expanded := -1, 0
+	for steps := 0; steps < len(buf); steps++ {
+		if off >= len(buf) {
+			return 0, false
+		}
+		n := int(buf[off])
+		if n&0xc0 == 0xc0 {
+			if off+1 >= len(buf) {
+				return 0, false
+			}
+			target := (n&0x3f)<<8 | int(buf[off+1])
+			if target < 12 || target >= off {
+				return 0, false
+			}
+			if next < 0 {
+				next = off + 2
+			}
+			off = target
+			continue
+		}
+		if n&0xc0 != 0 || off+1+n > len(buf) {
+			return 0, false
+		}
+		if n == 0 {
+			if next < 0 {
+				next = off + 1
+			}
+			return next, expanded > 0
+		}
+		if expanded == 0 {
+			if n != 32 {
+				return 0, false
+			}
+			for _, c := range buf[off+1 : off+1+n] {
+				if c < 'A' || c > 'P' {
+					return 0, false
+				}
+			}
+		}
+		expanded += n + 1
+		if expanded > 254 {
+			return 0, false
+		}
+		off += n + 1
+	}
+	return 0, false
 }
 
 // sanitizeNetBIOSName converts the 15-byte name field from an NBNS name

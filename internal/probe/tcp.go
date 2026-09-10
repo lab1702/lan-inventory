@@ -4,10 +4,8 @@ package probe
 
 import (
 	"context"
-	"errors"
 	"net"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -36,12 +34,9 @@ func TCPAlive(ctx context.Context, ip string) bool {
 			conn.Close()
 			return true
 		}
-		// ECONNREFUSED means the host responded with RST — it's up. Match on
-		// the errno (unwrapped from *net.OpError → *os.SyscallError) rather
-		// than the error string, which is OS- and locale-dependent (e.g. on
-		// Windows the message is "... actively refused it", not "connection
-		// refused").
-		if errors.Is(err, syscall.ECONNREFUSED) {
+		// Match the platform's refusal errno through the net/syscall wrappers.
+		// A refusal means the host responded with RST, so it is alive.
+		if isConnectionRefused(err) {
 			return true
 		}
 	}

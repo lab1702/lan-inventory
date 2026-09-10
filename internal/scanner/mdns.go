@@ -13,16 +13,18 @@ import (
 	"github.com/grandcat/zeroconf"
 
 	"github.com/lab1702/lan-inventory/internal/model"
+	"github.com/lab1702/lan-inventory/internal/netiface"
 )
 
 // MDNSWorker browses for mDNS services on the given interface and emits an
-// Update for each discovered instance.
-type MDNSWorker struct{}
+// Update for each discovered instance in the selected IPv4 subnet.
+type MDNSWorker struct {
+	Iface *netiface.Info
+}
 
 // commonServiceTypes is the seed list we actively browse for. zeroconf doesn't
 // support a single "browse everything" query well, so we enumerate a handful
-// of widely-deployed services. Additional services that announce themselves
-// via gratuitous packets will still be observed.
+// of widely-deployed services.
 var commonServiceTypes = []string{
 	"_http._tcp",
 	"_https._tcp",
@@ -35,64 +37,103 @@ var commonServiceTypes = []string{
 	"_workstation._tcp",
 }
 
+type mdnsResolver interface {
+	Browse(context.Context, string, string, chan<- *zeroconf.ServiceEntry) error
+}
+
+func newMDNSResolver(iface net.Interface) (mdnsResolver, error) {
+	return zeroconf.NewResolver(
+		zeroconf.SelectIfaces([]net.Interface{iface}),
+		zeroconf.SelectIPTraffic(zeroconf.IPv4),
+	)
+}
+
 func (w *MDNSWorker) Run(ctx context.Context, out chan<- Update) error {
-	resolver, err := zeroconf.NewResolver(nil)
+	return w.run(ctx, out, net.InterfaceByName, newMDNSResolver)
+}
+
+func (w *MDNSWorker) run(ctx context.Context, out chan<- Update, lookupIface func(string) (*net.Interface, error), newResolver func(net.Interface) (mdnsResolver, error)) error {
+	if w.Iface == nil || w.Iface.Subnet == nil {
+		return fmt.Errorf("mDNS interface and subnet are required")
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	iface, err := lookupIface(w.Iface.Name)
 	if err != nil {
-		return fmt.Errorf("zeroconf resolver: %w", err)
+		return fmt.Errorf("mDNS interface %s: %w", w.Iface.Name, err)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+	failures := make(chan error, len(commonServiceTypes))
 	for _, svc := range commonServiceTypes {
+		if ctx.Err() != nil {
+			return nil
+		}
+		// Each Browse starts readers on its resolver's sockets. Sharing one
+		// resolver would let competing readers discard other services' replies.
+		resolver, err := newResolver(*iface)
+		if err != nil {
+			return fmt.Errorf("zeroconf resolver for %s: %w", svc, err)
+		}
 		entries := make(chan *zeroconf.ServiceEntry, 16)
-		wg.Add(2)
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			w.consume(ctx, svc, entries, out)
+			if ctx.Err() == nil {
+				failures <- fmt.Errorf("mDNS browse for %s stopped unexpectedly", svc)
+			}
 		}()
-		go func() {
-			defer wg.Done()
-			// Browse blocks until ctx is cancelled; its error is best-effort.
-			_ = resolver.Browse(ctx, svc, "local.", entries)
-		}()
+		// Browse returns after initialization; its mainloop closes entries on
+		// cancellation, including when the initial query fails.
+		if err := resolver.Browse(ctx, svc, "local.", entries); err != nil {
+			return fmt.Errorf("mDNS browse for %s: %w", svc, err)
+		}
 	}
-	<-ctx.Done()
-	// Wait for the browse/consume goroutines to unwind before returning so they
-	// don't outlive the worker.
-	wg.Wait()
-	return nil
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-failures:
+		return err
+	}
 }
 
 func (w *MDNSWorker) consume(ctx context.Context, svc string, entries <-chan *zeroconf.ServiceEntry, out chan<- Update) {
-	for {
+	// zeroconf sends entries without selecting on its context. Continue
+	// draining after cancellation until its mainloop closes the channel, so a
+	// full entry queue cannot prevent resolver shutdown.
+	for e := range entries {
+		if ctx.Err() != nil || e == nil {
+			continue
+		}
+		ip := w.scopedIP(e.AddrIPv4)
+		if ip == nil {
+			continue
+		}
+		txt := map[string]string{}
+		for _, kv := range e.Text {
+			if i := strings.IndexByte(kv, '='); i > 0 {
+				txt[strings.ToLower(kv[:i])] = kv[i+1:]
+			}
+		}
+		update := Update{
+			Source:   "mdns",
+			Time:     time.Now(),
+			IP:       ip,
+			Hostname: trimDot(e.HostName),
+			Services: []model.ServiceInst{
+				{Type: svc, Name: e.Instance, Port: e.Port, TXT: txt},
+			},
+		}
 		select {
+		case out <- update:
 		case <-ctx.Done():
-			return
-		case e, ok := <-entries:
-			if !ok {
-				return
-			}
-			txt := map[string]string{}
-			for _, kv := range e.Text {
-				if i := strings.IndexByte(kv, '='); i > 0 {
-					txt[strings.ToLower(kv[:i])] = kv[i+1:]
-				}
-			}
-			update := Update{
-				Source:   "mdns",
-				Time:     time.Now(),
-				Hostname: trimDot(e.HostName),
-				Services: []model.ServiceInst{
-					{Type: svc, Name: e.Instance, Port: e.Port, TXT: txt},
-				},
-			}
-			if len(e.AddrIPv4) > 0 {
-				update.IP = pickFirstIP(e.AddrIPv4)
-			}
-			select {
-			case out <- update:
-			case <-ctx.Done():
-				return
-			}
 		}
 	}
 }
@@ -104,10 +145,10 @@ func trimDot(s string) string {
 	return s
 }
 
-func pickFirstIP(ips []net.IP) net.IP {
+func (w *MDNSWorker) scopedIP(ips []net.IP) net.IP {
 	for _, ip := range ips {
-		if ip.To4() != nil {
-			return ip
+		if ip4 := ip.To4(); ip4 != nil && !ip4.IsUnspecified() && w.Iface.Subnet.Contains(ip4) {
+			return append(net.IP(nil), ip4...)
 		}
 	}
 	return nil

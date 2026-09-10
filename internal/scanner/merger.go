@@ -37,18 +37,20 @@ func (o *MergerOptions) defaults() {
 type Merger struct {
 	opts MergerOptions
 
-	mu      sync.RWMutex
-	byMAC   map[string]*model.Device
-	byIP    map[string]*model.Device // for MAC-less entries
+	mu             sync.RWMutex
+	byMAC          map[string]*model.Device
+	byIP           map[string]*model.Device // for MAC-less entries
+	hostnameSource map[*model.Device]string
 }
 
 // NewMerger constructs an idle merger; call Run to start consuming updates.
 func NewMerger(opts MergerOptions) *Merger {
 	opts.defaults()
 	return &Merger{
-		opts:  opts,
-		byMAC: make(map[string]*model.Device),
-		byIP:  make(map[string]*model.Device),
+		opts:           opts,
+		byMAC:          make(map[string]*model.Device),
+		byIP:           make(map[string]*model.Device),
+		hostnameSource: make(map[*model.Device]string),
 	}
 }
 
@@ -128,11 +130,30 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 			created = true
 			m.byMAC[mac] = dev
 		}
+		// An ARP observation assigns this IP to one MAC. Remove old ownership
+		// before later MAC-less probes can be attributed to an arbitrary device.
+		if ipKey != "" {
+			for otherMAC, other := range m.byMAC {
+				if otherMAC == mac {
+					continue
+				}
+				for i := len(other.IPs) - 1; i >= 0; i-- {
+					if other.IPs[i].Equal(u.IP) {
+						other.IPs = append(other.IPs[:i], other.IPs[i+1:]...)
+					}
+				}
+			}
+		}
 		// Migrate IP-only entry if present — the device was already known under
 		// the IP key, so this is a refinement (Updated), not a new sighting (Joined).
 		if ipKey != "" {
 			if old, ok := m.byIP[ipKey]; ok && old != dev {
+				if old.Hostname != "" && (dev.Hostname == "" || m.hostnameSource[old] == "mdns" && m.hostnameSource[dev] != "mdns") {
+					dev.Hostname = old.Hostname
+					m.hostnameSource[dev] = m.hostnameSource[old]
+				}
 				mergeFromIPOnly(dev, old)
+				delete(m.hostnameSource, old)
 				delete(m.byIP, ipKey)
 				created = false
 			}
@@ -155,6 +176,10 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 		return // can't key this update
 	}
 
+	if u.Hostname != "" && (u.Source == "mdns" || m.hostnameSource[dev] != "mdns") {
+		dev.Hostname = u.Hostname
+		m.hostnameSource[dev] = u.Source
+	}
 	mergeUpdate(dev, u)
 
 	evt := model.DeviceEvent{Device: copyDevice(dev)}
@@ -225,9 +250,6 @@ func mergeUpdate(dev *model.Device, u Update) {
 	}
 	if u.MAC != "" && dev.MAC == "" {
 		dev.MAC = strings.ToLower(u.MAC)
-	}
-	if u.Hostname != "" {
-		dev.Hostname = u.Hostname
 	}
 	if u.Vendor != "" {
 		dev.Vendor = u.Vendor

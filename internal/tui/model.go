@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lab1702/lan-inventory/internal/model"
 )
@@ -28,18 +29,18 @@ const (
 type Deps struct {
 	Subnet   string
 	Iface    string
-	Snapshot func() []*model.Device                // returns a fresh slice each call
-	Events   func() <-chan model.DeviceEvent       // single-consumer channel of new events
-	OnRescan func()                                // optional: called when user presses 'r'
+	Snapshot func() []*model.Device          // returns a fresh slice each call
+	Events   func() <-chan model.DeviceEvent // single-consumer channel of new events
+	OnRescan func()                          // optional: called when user presses 'r'
 }
 
 // Model is the root Bubble Tea model.
 type Model struct {
 	deps Deps
 
-	tab      tab
-	devices  []*model.Device
-	events   []model.Event
+	tab     tab
+	devices []*model.Device
+	events  []model.Event
 
 	width  int
 	height int
@@ -48,10 +49,11 @@ type Model struct {
 	quitting     bool
 
 	// Devices-tab interaction state
-	filterBuf    string // current filter text
-	filterMode   bool   // true while typing filter
-	selectedRow  int    // selected device index after sort+filter
-	rescanNonce  int    // bumped by 'r' to signal scanner (consumed via Deps.OnRescan)
+	filterBuf   string // current filter text
+	filterMode  bool   // true while typing filter
+	selectedRow int    // selected device index after sort+filter
+	scrollRows  [4]int // first visible row in each tab
+	rescanNonce int    // bumped by 'r' to signal scanner (consumed via Deps.OnRescan)
 
 	// help overlay
 	showHelp bool
@@ -62,6 +64,8 @@ func NewModel(deps Deps) Model {
 		deps:         deps,
 		tab:          tabDevices,
 		pollInterval: 1 * time.Second,
+		width:        120,
+		height:       24,
 	}
 }
 
@@ -93,6 +97,12 @@ func listenEvents(ch <-chan model.DeviceEvent) tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	next.clampViewport()
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -150,13 +160,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			m.showHelp = true
 		case "up", "k":
-			if m.selectedRow > 0 {
-				m.selectedRow--
-			}
+			m.moveRow(-1)
 		case "down", "j":
-			n := len(filterDevices(m.devices, m.filterBuf))
-			if m.selectedRow < n-1 {
-				m.selectedRow++
+			m.moveRow(1)
+		case "pgup":
+			m.moveRow(-m.pageSize())
+		case "pgdown":
+			m.moveRow(m.pageSize())
+		case "home":
+			if m.tab == tabDevices {
+				m.selectedRow = 0
+			}
+			m.scrollRows[m.tab] = 0
+		case "end":
+			if m.tab == tabDevices {
+				m.selectedRow = len(m.devices)
+			} else {
+				m.scrollRows[m.tab] = len(contentLines(m.tabContent()))
 			}
 		}
 	case tickMsg:
@@ -170,6 +190,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			evt.IP = msg.Device.IPs[0]
 		}
 		m.events = append([]model.Event{evt}, m.events...)
+		// Follow incoming events at the top; preserve the reader's position
+		// when they have scrolled into older events.
+		if m.scrollRows[tabEvents] > 0 {
+			m.scrollRows[tabEvents]++
+		}
 		if len(m.events) > 200 {
 			m.events = m.events[:200]
 		}
@@ -185,7 +210,7 @@ func (m Model) View() string {
 		return ""
 	}
 	if m.showHelp {
-		return helpText()
+		return m.fitTerminal(helpText())
 	}
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
@@ -194,17 +219,26 @@ func (m Model) View() string {
 	case tabDevices:
 		b.WriteString(m.viewDevices())
 	case tabServices:
-		b.WriteString(m.viewServices())
+		b.WriteString(m.scrollContent(m.viewServices()))
 	case tabSubnet:
-		b.WriteString(m.viewSubnet())
+		b.WriteString(m.scrollContent(m.viewSubnet()))
 	case tabEvents:
-		b.WriteString(m.viewEvents())
+		b.WriteString(m.scrollContent(m.viewEvents()))
 	}
 	if m.filterMode || m.filterBuf != "" {
 		b.WriteString("\n\n")
 		b.WriteString(styleWarn.Render(fmt.Sprintf("/filter: %s", m.filterBuf)))
 	}
-	return b.String()
+	return m.fitTerminal(b.String())
+}
+
+func (m Model) fitTerminal(content string) string {
+	if m.width <= 0 || m.height <= 0 {
+		return ""
+	}
+	// Bound the width as well, so terminal wrapping cannot push the header
+	// or selection out of the height-bounded frame.
+	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content)
 }
 
 func helpText() string {
@@ -213,7 +247,9 @@ func helpText() string {
 		desc string
 	}{
 		{"1-4", "switch tabs (Devices / Services / Subnet / Events)"},
-		{"↑/↓ or k/j", "navigate selection"},
+		{"↑/↓ or k/j", "select devices / scroll the current tab"},
+		{"PgUp/PgDn", "move one page"},
+		{"Home/End", "first/last row (Home shows newest events)"},
 		{"Enter", "(in filter mode) apply the filter"},
 		{"/", "start filter (typing narrows the device list; Enter applies)"},
 		{"r", "force a rescan now"},

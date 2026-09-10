@@ -19,11 +19,8 @@ func (m Model) viewDevices() string {
 	if len(devices) == 0 {
 		return "(no devices match)"
 	}
-	if m.selectedRow >= len(devices) {
-		m.selectedRow = len(devices) - 1
-	}
-
 	var b strings.Builder
+	headers, rows, details := m.deviceLayout(devices)
 
 	const (
 		wIP     = 15
@@ -45,12 +42,19 @@ func (m Model) viewDevices() string {
 		styleHeaderRow.Render("Status"),
 	}
 	header := "  " + strings.Join(headerCells, "  ")
-	b.WriteString(header)
-	b.WriteString("\n")
-	b.WriteString(styleDim.Render(strings.Repeat("-", visibleLen(header))))
-	b.WriteString("\n")
+	if headers > 0 {
+		b.WriteString(header)
+		b.WriteString("\n")
+	}
+	if headers > 1 {
+		b.WriteString(styleDim.Render(strings.Repeat("-", visibleLen(header))))
+		b.WriteString("\n")
+	}
 
-	for i, d := range devices {
+	start := m.scrollRows[tabDevices]
+	end := min(len(devices), start+rows)
+	for i := start; i < end; i++ {
+		d := devices[i]
 		marker := "  "
 		if i == m.selectedRow {
 			marker = "> "
@@ -98,11 +102,11 @@ func (m Model) viewDevices() string {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	if len(devices) > 0 {
+	if len(details) > 0 {
 		b.WriteString("\n")
-		b.WriteString(detailStrip(devices[m.selectedRow]))
+		b.WriteString(strings.Join(details, "\n"))
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func filterDevices(in []*model.Device, q string) []*model.Device {

@@ -4,6 +4,7 @@ package probe
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 	"time"
 )
@@ -27,7 +28,7 @@ func makeNBNSResponse(names []string, suffixes []byte, groupFlags []bool) []byte
 	q = append(q, 0x00, 0x00, 0x21, 0x00, 0x01)
 
 	// 12-byte answer header: name pointer + type + class + TTL + RDLENGTH
-	rdlen := 1 + 18*len(names)
+	rdlen := 1 + 18*len(names) + 46
 	ans := []byte{
 		0xC0, 0x0C,
 		0x00, 0x21,
@@ -55,6 +56,7 @@ func makeNBNSResponse(names []string, suffixes []byte, groupFlags []bool) []byte
 		rdata = append(rdata, nameBytes...)
 		rdata = append(rdata, flags[:]...)
 	}
+	rdata = append(rdata, make([]byte, 46)...)
 
 	out := append([]byte{}, hdr...)
 	out = append(out, q...)
@@ -96,17 +98,89 @@ func TestParseNBNSResponseTooShort(t *testing.T) {
 }
 
 func TestParseNBNSResponseEmptyList(t *testing.T) {
-	// An NBNS response with NUM_NAMES=0 in a buffer that's still >= minLen.
-	// makeNBNSResponse(nil, nil, nil) only produces 63 bytes which trips the
-	// minLen guard rather than the numNames check; build a padded buffer to
-	// exercise the numNames==0 branch directly.
 	resp := makeNBNSResponse(nil, nil, nil)
-	for len(resp) < 81 {
-		resp = append(resp, 0x00)
-	}
 	got := parseNBNSResponse(resp)
 	if got != "" {
 		t.Errorf("empty-list response should yield empty, got %q", got)
+	}
+}
+
+func TestParseNBNSResponseNoQuestion(t *testing.T) {
+	resp := makeNBNSResponse([]string{"STANDARD-HOST"}, []byte{0}, []bool{false})
+	// RFC 1002 section 4.2.18 has QDCOUNT=0 and an uncompressed RR_NAME.
+	standard := append([]byte{}, resp[:12]...)
+	standard[5] = 0
+	standard = append(standard, nbnsQuery[12:46]...)
+	standard = append(standard, resp[52:]...)
+	if got := parseNBNSResponse(standard); got != "STANDARD-HOST" {
+		t.Fatalf("standard response = %q, want STANDARD-HOST", got)
+	}
+	for n := 0; n < len(standard); n++ {
+		if got := parseNBNSResponse(standard[:n]); got != "" {
+			t.Fatalf("truncated response of %d bytes = %q, want empty", n, got)
+		}
+	}
+}
+
+func TestParseNBNSResponseFullNameTable(t *testing.T) {
+	names, suffixes, groups := make([]string, 255), make([]byte, 255), make([]bool, 255)
+	for i := range names {
+		names[i], groups[i] = "GROUP", true
+	}
+	names[254], groups[254] = "LAST-HOST", false
+	if got := parseNBNSResponse(makeNBNSResponse(names, suffixes, groups)); got != "LAST-HOST" {
+		t.Fatalf("full name table = %q, want LAST-HOST", got)
+	}
+}
+
+func TestParseNBNSResponseMalformed(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func([]byte) []byte
+	}{
+		{"wrong transaction", func(b []byte) []byte { b[1]++; return b }},
+		{"query packet", func(b []byte) []byte { b[2] &^= 0x80; return b }},
+		{"wrong opcode", func(b []byte) []byte { b[2] |= 0x08; return b }},
+		{"truncated flag", func(b []byte) []byte { b[2] |= 0x02; return b }},
+		{"error status", func(b []byte) []byte { b[3] |= 1; return b }},
+		{"extra question", func(b []byte) []byte { b[5] = 2; return b }},
+		{"no answer", func(b []byte) []byte { b[7] = 0; return b }},
+		{"extra answer", func(b []byte) []byte { b[7] = 2; return b }},
+		{"authority record", func(b []byte) []byte { b[9] = 1; return b }},
+		{"additional record", func(b []byte) []byte { b[11] = 1; return b }},
+		{"bad question type", func(b []byte) []byte { b[47] = 0x20; return b }},
+		{"bad question class", func(b []byte) []byte { b[49] = 2; return b }},
+		{"bad answer type", func(b []byte) []byte { b[53] = 0x20; return b }},
+		{"bad answer class", func(b []byte) []byte { b[55] = 2; return b }},
+		{"empty rdata", func(b []byte) []byte { b[60], b[61] = 0, 0; return b }},
+		{"short rdata length", func(b []byte) []byte { b[61]--; return b }},
+		{"long rdata length", func(b []byte) []byte { b[61]++; return b }},
+		{"missing declared name", func(b []byte) []byte { b[62]++; return b }},
+		{"truncated last record", func(b []byte) []byte {
+			b = b[:len(b)-47]
+			binary.BigEndian.PutUint16(b[60:62], uint16(len(b)-62))
+			return b
+		}},
+		{"missing statistics", func(b []byte) []byte {
+			b = b[:len(b)-1]
+			binary.BigEndian.PutUint16(b[60:62], uint16(len(b)-62))
+			return b
+		}},
+		{"bad encoded label", func(b []byte) []byte { b[13] = 'Z'; return b }},
+		{"invalid label length", func(b []byte) []byte { b[12] = 0x80; return b }},
+		{"pointer to header", func(b []byte) []byte { b[51] = 0; return b }},
+		{"self pointer", func(b []byte) []byte { b[51] = 50; return b }},
+		{"forward pointer", func(b []byte) []byte { b[51] = 80; return b }},
+		{"pointer cycle", func(b []byte) []byte { b[45], b[46] = 0xc0, 0x0c; return b }},
+		{"truncated pointer", func(b []byte) []byte { return b[:51] }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := makeNBNSResponse([]string{"FIRST", "SECOND"}, []byte{0, 0}, []bool{false, false})
+			if got := parseNBNSResponse(tt.edit(resp)); got != "" {
+				t.Fatalf("malformed response returned %q", got)
+			}
+		})
 	}
 }
 

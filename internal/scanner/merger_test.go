@@ -4,6 +4,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -281,5 +282,52 @@ func TestMergerKnownIPs(t *testing.T) {
 	}
 	if len(known) != 2 {
 		t.Errorf("expected 2 known IPs, got %d: %v", len(known), known)
+	}
+}
+func TestMergerReassignsIPToNewMAC(t *testing.T) {
+	m := NewMerger(MergerOptions{})
+	out := make(chan model.DeviceEvent, 10)
+	ip := net.ParseIP("192.168.1.50")
+	now := time.Now()
+	m.handleUpdate(Update{Source: "arp", IP: ip, MAC: "aa:bb:cc:dd:ee:01", Time: now}, out)
+	m.handleUpdate(Update{Source: "arp", IP: ip, MAC: "aa:bb:cc:dd:ee:02", Time: now.Add(time.Second)}, out)
+	m.handleUpdate(Update{Source: "active", IP: ip, Alive: true, Hostname: "new-owner", Time: now.Add(2 * time.Second)}, out)
+	for _, d := range m.Snapshot() {
+		switch d.MAC {
+		case "aa:bb:cc:dd:ee:01":
+			if len(d.IPs) != 0 || d.Hostname != "" {
+				t.Fatalf("old owner retained reassigned identity: %+v", d)
+			}
+		case "aa:bb:cc:dd:ee:02":
+			if len(d.IPs) != 1 || !d.IPs[0].Equal(ip) || d.Hostname != "new-owner" {
+				t.Fatalf("new owner missing update: %+v", d)
+			}
+		}
+	}
+}
+
+func TestMergerPrefersMDNSHostnameAcrossIdentityMigration(t *testing.T) {
+	for _, macFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(macFirst), func(t *testing.T) {
+			m := NewMerger(MergerOptions{})
+			out := make(chan model.DeviceEvent, 10)
+			ip := net.ParseIP("192.168.1.50")
+			arp := Update{Source: "arp", IP: ip, MAC: "aa:bb:cc:dd:ee:01", Time: time.Now()}
+			if macFirst {
+				m.handleUpdate(arp, out)
+			}
+			m.handleUpdate(Update{Source: "mdns", IP: ip, Hostname: "printer.local", Time: time.Now()}, out)
+			if !macFirst {
+				m.handleUpdate(arp, out)
+			}
+			m.handleUpdate(Update{Source: "active", IP: ip, Hostname: "dhcp-50", Alive: true, Time: time.Now()}, out)
+			if got := m.Snapshot()[0].Hostname; got != "printer.local" {
+				t.Fatalf("hostname = %q", got)
+			}
+			m.handleUpdate(Update{Source: "mdns", IP: ip, Hostname: "renamed.local", Time: time.Now()}, out)
+			if got := m.Snapshot()[0].Hostname; got != "renamed.local" {
+				t.Fatalf("mDNS rename ignored: %q", got)
+			}
+		})
 	}
 }

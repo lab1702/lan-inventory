@@ -26,7 +26,7 @@ func Precheck(iface *netiface.Info) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNoRawSocket, err)
 	}
-	handle, err := pcap.OpenLive(dev, 65536, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(dev, 65536, true, arpReadTimeout)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrNoRawSocket, err)
 	}

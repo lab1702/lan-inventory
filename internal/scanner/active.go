@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lab1702/lan-inventory/internal/model"
 	"github.com/lab1702/lan-inventory/internal/probe"
 )
 
@@ -15,17 +16,29 @@ import (
 // learned about, calling probe.Ping, probe.ScanPorts, and probe.ResolveHostname.
 // One full sweep emits one Update per responding host.
 type ActiveWorker struct {
-	Subnet      *net.IPNet
-	HostIPs     []net.IP // pre-enumerated subnet hosts
-	Gateway     net.IP   // default-route gateway IP for the gateway-resolver hostname probe
-	Interval    time.Duration
-	WorkerCount int
+	Subnet       *net.IPNet
+	HostIPs      []net.IP // pre-enumerated subnet hosts
+	Gateway      net.IP   // default-route gateway IP for the gateway-resolver hostname probe
+	Interval     time.Duration
+	WorkerCount  int
+	InitialDelay time.Duration
+	Once         bool
+	Rescan       <-chan struct{}
 	// KnownIPs returns the set of ARP-confirmed IP addresses (string form).
 	// When set, the worker bypasses the liveness gate for these IPs and
 	// runs the enrichment chain regardless — useful for hosts that
 	// stealth-drop ICMP/TCP probes (Windows 11 default firewall) but
 	// still respond to UDP-based queries like NBNS. Optional.
 	KnownIPs func() map[string]struct{}
+	probes   *activeProbes
+}
+
+type activeProbes struct {
+	ping     func(context.Context, string) (probe.PingResult, error)
+	tcpAlive func(context.Context, string) bool
+	nbns     func(context.Context, string) string
+	hostname func(context.Context, string, net.IP) string
+	ports    func(context.Context, string, []int, time.Duration) []model.Port
 }
 
 func (w *ActiveWorker) Run(ctx context.Context, out chan<- Update) error {
@@ -37,8 +50,20 @@ func (w *ActiveWorker) Run(ctx context.Context, out chan<- Update) error {
 		interval = 30 * time.Second
 	}
 
-	// Run an initial sweep immediately, then on the interval.
+	if w.InitialDelay > 0 {
+		timer := time.NewTimer(w.InitialDelay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	// A one-shot run returns only after every host has been probed.
 	w.sweepOnce(ctx, out)
+	if w.Once {
+		return ctx.Err()
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -46,6 +71,8 @@ func (w *ActiveWorker) Run(ctx context.Context, out chan<- Update) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			w.sweepOnce(ctx, out)
+		case <-w.Rescan:
 			w.sweepOnce(ctx, out)
 		}
 	}
@@ -97,28 +124,36 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, isKnown bool, ou
 	if ctx.Err() != nil {
 		return
 	}
+	p := w.probes
+	if p == nil {
+		p = &activeProbes{probe.Ping, probe.TCPAlive, probe.NBNS, probe.ResolveHostname, probe.ScanPorts}
+	}
 	// ICMP first — gives us TTL (used by OSDetect) and RTT.
-	pingRes, _ := probe.Ping(ctx, ip.String())
+	pingRes, _ := p.ping(ctx, ip.String())
 	var ttl int
 	var rtt time.Duration
 	alive := pingRes.Alive
 	if alive {
 		ttl = pingRes.TTL
 		rtt = pingRes.RTT
-	} else if probe.TCPAlive(ctx, ip.String()) {
+	} else if p.tcpAlive(ctx, ip.String()) {
 		// TCP signal of life (success or RST) — proceed without TTL/RTT.
 		alive = true
-	} else if isKnown {
-		// ARP confirms this device exists. Run enrichment regardless —
-		// the host may stealth-drop ICMP/TCP probes (Windows 11 Firewall
-		// default) but still respond to UDP-based probes like NBNS.
-		alive = true
 	}
-	if !alive {
+	if !alive && !isKnown {
 		return
 	}
-	// Run the full enrichment chain.
-	nbnsName := probe.NBNS(ctx, ip.String())
+	// Historical ARP identity justifies trying more probes, but only a
+	// current response from the host can refresh its last-seen timestamp.
+	nbnsName := p.nbns(ctx, ip.String())
+	ports := p.ports(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond)
+	if !alive && nbnsName == "" && len(ports) == 0 {
+		return
+	}
+	hostname := p.hostname(ctx, ip.String(), w.Gateway)
+	if ctx.Err() != nil {
+		return // do not publish a cancelled, partially completed port scan
+	}
 	update := Update{
 		Source:        "active",
 		Time:          time.Now(),
@@ -126,8 +161,8 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, isKnown bool, ou
 		Alive:         true,
 		RTT:           rtt,
 		TTL:           ttl,
-		Hostname:      probe.ResolveHostname(ctx, ip.String(), w.Gateway),
-		OpenPorts:     probe.ScanPorts(ctx, ip.String(), probe.DefaultPorts(), 500*time.Millisecond),
+		Hostname:      hostname,
+		OpenPorts:     ports,
 		NBNSResponded: nbnsName != "",
 	}
 	select {
