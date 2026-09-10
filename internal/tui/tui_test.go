@@ -107,7 +107,7 @@ func TestServicesTabGroupsByType(t *testing.T) {
 	if !bytes.Contains(out, []byte("_http._tcp")) {
 		t.Errorf("expected _http._tcp grouping:\n%s", out)
 	}
-	if !bytes.Contains(out, []byte("2 instances")) {
+	if !bytes.Contains(out, []byte("2 hosts")) {
 		t.Errorf("expected count summary:\n%s", out)
 	}
 }

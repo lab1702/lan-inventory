@@ -4,6 +4,9 @@ package probe
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+	"io"
 	"net"
 	"runtime"
 	"testing"
@@ -119,4 +122,114 @@ func TestDNSConnectionCloseUnregistersCancellation(t *testing.T) {
 	if conn.(*dnsContextConn).stop() {
 		t.Fatal("normal Close left a context callback registered")
 	}
+}
+
+func TestReverseDNSViaRetriesTruncatedUDPOverTCP(t *testing.T) {
+	tcp, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tcp.Close()
+	udp, err := net.ListenPacket("udp4", tcp.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	if err := tcp.SetDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	if err := udp.SetDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	serverResult := make(chan error, 1)
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		serverResult <- serveTruncatedDNS(udp, tcp, deadline)
+	}()
+	t.Cleanup(func() {
+		udp.Close()
+		tcp.Close()
+		select {
+		case <-serverDone:
+		case <-time.After(3 * time.Second):
+			t.Error("DNS test server did not stop")
+		}
+	})
+	got := reverseDNSViaAddress(context.Background(), "203.0.113.249", tcp.Addr().String())
+	if got != "gateway-host.lan" {
+		t.Fatalf("PTR lookup after UDP truncation = %q, want gateway-host.lan", got)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func serveTruncatedDNS(udp net.PacketConn, tcp *net.TCPListener, deadline time.Time) error {
+	buf := make([]byte, 1500)
+	n, addr, err := udp.ReadFrom(buf)
+	if err != nil {
+		return fmt.Errorf("read UDP query: %w", err)
+	}
+	var query dnsmessage.Message
+	if err := query.Unpack(buf[:n]); err != nil {
+		return fmt.Errorf("decode UDP query: %w", err)
+	}
+	if len(query.Questions) != 1 || query.Questions[0].Type != dnsmessage.TypePTR ||
+		query.Questions[0].Name.String() != "249.113.0.203.in-addr.arpa." {
+		return fmt.Errorf("unexpected UDP questions: %+v", query.Questions)
+	}
+	response := dnsmessage.Message{
+		Header: dnsmessage.Header{
+			ID: query.ID, Response: true, Truncated: true,
+			RecursionDesired: query.RecursionDesired, RecursionAvailable: true,
+		},
+		Questions: query.Questions,
+	}
+	wire, err := response.Pack()
+	if err != nil {
+		return err
+	}
+	if _, err := udp.WriteTo(wire, addr); err != nil {
+		return fmt.Errorf("write truncated UDP reply: %w", err)
+	}
+	conn, err := tcp.Accept()
+	if err != nil {
+		return fmt.Errorf("accept TCP fallback: %w", err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		return fmt.Errorf("read TCP DNS length: %w", err)
+	}
+	wire = make([]byte, binary.BigEndian.Uint16(size[:]))
+	if _, err := io.ReadFull(conn, wire); err != nil {
+		return fmt.Errorf("read TCP DNS query: %w", err)
+	}
+	var retry dnsmessage.Message
+	if err := retry.Unpack(wire); err != nil {
+		return fmt.Errorf("decode TCP query: %w", err)
+	}
+	if len(retry.Questions) != 1 || retry.Questions[0] != query.Questions[0] {
+		return fmt.Errorf("TCP retry changed the PTR question: %+v", retry.Questions)
+	}
+	response.ID = retry.ID
+	response.Truncated = false
+	response.Answers = []dnsmessage.Resource{{
+		Header: dnsmessage.ResourceHeader{
+			Name: retry.Questions[0].Name, Type: dnsmessage.TypePTR, Class: dnsmessage.ClassINET, TTL: 60,
+		},
+		Body: &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName("gateway-host.lan.")},
+	}}
+	wire, err = response.Pack()
+	if err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint16(size[:], uint16(len(wire)))
+	_, err = conn.Write(append(size[:], wire...))
+	return err
 }

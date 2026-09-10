@@ -102,3 +102,28 @@ func TestRowsToUpdates_PopulatesVendor(t *testing.T) {
 		t.Error("expected non-empty Vendor for known OUI 08:3a:8d")
 	}
 }
+
+func TestRowsToUpdatesRejectsBroadcastAndMulticastNeighbors(t *testing.T) {
+	staticMAC := net.HardwareAddr{0x02, 1, 2, 3, 4, 5}
+	rows := []arpRow{
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.255"), MAC: net.HardwareAddr{255, 255, 255, 255, 255, 255}, Reachable: neighborReachable(nlNeighborStatePermanent)},
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.255"), MAC: staticMAC, Reachable: true},
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.0"), MAC: staticMAC, Reachable: true},
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.20"), MAC: net.HardwareAddr{1, 0, 0x5e, 0, 0, 1}, Reachable: true},
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.10"), MAC: staticMAC, Reachable: neighborReachable(nlNeighborStatePermanent)},
+	}
+	got := rowsToUpdates(rows, 7, mustCIDRWin(t, "192.168.2.0/24"), time.Now())
+	if len(got) != 1 || got[0].IP.String() != "192.168.2.10" {
+		t.Fatalf("broadcast filtering lost static host or kept phantom: %+v", got)
+	}
+}
+
+func TestRowsToUpdatesKeeps31Endpoints(t *testing.T) {
+	rows := []arpRow{
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.0"), MAC: net.HardwareAddr{2, 1, 2, 3, 4, 5}, Reachable: true},
+		{IfaceIndex: 7, IP: net.ParseIP("192.168.2.1"), MAC: net.HardwareAddr{2, 1, 2, 3, 4, 6}, Reachable: true},
+	}
+	if got := rowsToUpdates(rows, 7, mustCIDRWin(t, "192.168.2.0/31"), time.Now()); len(got) != 2 {
+		t.Fatalf("/31 endpoints filtered: %+v", got)
+	}
+}

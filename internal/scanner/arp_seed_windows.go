@@ -29,7 +29,7 @@ type arpRow struct {
 }
 
 // rowsToUpdates filters arpRows by interface index and subnet membership,
-// drops zero-MAC and unreachable entries, and emits one Update per
+// drops non-unicast and unreachable entries, and emits one Update per
 // survivor. The emitted shape is identical to parseProcNetARP's output on
 // Linux: Source "arp-seed", lowercase MAC, vendor populated from the
 // bundled OUI table.
@@ -45,12 +45,23 @@ func rowsToUpdates(rows []arpRow, ifaceIndex uint32, subnet *net.IPNet, now time
 		if len(r.MAC) != 6 {
 			continue
 		}
-		if isZeroMAC(r.MAC) {
+		if isZeroMAC(r.MAC) || r.MAC[0]&1 != 0 {
 			continue
 		}
 		ip4 := r.IP.To4()
-		if ip4 == nil || !subnet.Contains(ip4) {
+		if ip4 == nil || !ip4.IsGlobalUnicast() || !subnet.Contains(ip4) {
 			continue
+		}
+		ones, _ := subnet.Mask.Size()
+		if ones < 31 {
+			network := subnet.IP.Mask(subnet.Mask).To4()
+			broadcast := make(net.IP, net.IPv4len)
+			for i := range broadcast {
+				broadcast[i] = network[i] | ^subnet.Mask[i]
+			}
+			if ip4.Equal(network) || ip4.Equal(broadcast) {
+				continue
+			}
 		}
 		mac := strings.ToLower(r.MAC.String())
 		out = append(out, Update{

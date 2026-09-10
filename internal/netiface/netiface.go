@@ -112,6 +112,14 @@ func Detect() (*Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read addrs for %s: %w", defaultIface.Name, err)
 	}
+	return infoForAddresses(defaultIface.Name, addrs, gateway)
+}
+
+// Match the route gateway before applying the scan-size limit. Interfaces can
+// carry secondary IPv4 addresses that do not belong to the default route.
+func infoForAddresses(name string, addrs []net.Addr, gateway net.IP) (*Info, error) {
+	var first, routed *net.IPNet
+	bestPrefix := -1
 	for _, addr := range addrs {
 		ipnet, ok := addr.(*net.IPNet)
 		if !ok {
@@ -125,11 +133,23 @@ func Detect() (*Info, error) {
 		if bits != 32 {
 			continue
 		}
-		subnet := &net.IPNet{IP: ip4.Mask(ipnet.Mask), Mask: net.CIDRMask(ones, 32)}
-		if err := CheckSubnetSize(subnet); err != nil {
-			return nil, err
+		candidate := &net.IPNet{IP: append(net.IP(nil), ip4...), Mask: net.CIDRMask(ones, 32)}
+		if first == nil {
+			first = candidate
 		}
-		return &Info{Name: defaultIface.Name, Subnet: subnet, HostIP: ip4, Gateway: gateway}, nil
+		if gateway != nil && !gateway.IsUnspecified() && candidate.Contains(gateway) && ones > bestPrefix {
+			routed, bestPrefix = candidate, ones
+		}
 	}
-	return nil, fmt.Errorf("no IPv4 address on interface %s", defaultIface.Name)
+	if routed == nil {
+		routed = first // on-link routes need not provide an in-subnet gateway
+	}
+	if routed == nil {
+		return nil, fmt.Errorf("no IPv4 address on interface %s", name)
+	}
+	subnet := &net.IPNet{IP: routed.IP.Mask(routed.Mask), Mask: routed.Mask}
+	if err := CheckSubnetSize(subnet); err != nil {
+		return nil, err
+	}
+	return &Info{Name: name, Subnet: subnet, HostIP: routed.IP, Gateway: gateway}, nil
 }

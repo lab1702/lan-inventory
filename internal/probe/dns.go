@@ -29,13 +29,16 @@ func ReverseDNSVia(ctx context.Context, ip string, resolverIP string) string {
 	if resolverIP == "" {
 		return ""
 	}
-	r := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 500 * time.Millisecond}
-			return d.DialContext(ctx, "udp", net.JoinHostPort(resolverIP, "53"))
-		},
-	}
+	return reverseDNSViaAddress(ctx, ip, net.JoinHostPort(resolverIP, "53"))
+}
+
+func reverseDNSViaAddress(ctx context.Context, ip, resolverAddress string) string {
+	r := newCancellableDNSResolver(func(ctx context.Context, network, _ string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 500 * time.Millisecond}
+		// Preserve the requested transport so truncated UDP replies can be
+		// retried over TCP against the same LAN DNS server.
+		return d.DialContext(ctx, network, resolverAddress)
+	})
 	cctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 	names, err := r.LookupAddr(cctx, ip)
