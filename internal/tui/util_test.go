@@ -11,6 +11,8 @@ func TestVisibleLen(t *testing.T) {
 	}{
 		{"", 0},
 		{"abc", 3},
+		{"打印机", 6},
+		{"cafe\u0301", 4},
 		{"\x1b[32monline\x1b[0m", 6},
 		{"\x1b[31m\x1b[1mERR\x1b[0m", 3},
 		{"\x1b[2;32mboth\x1b[0m", 4},

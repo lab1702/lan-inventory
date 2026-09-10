@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -185,5 +186,104 @@ func TestEventsFollowNewestUnlessScrolled(t *testing.T) {
 	m = pressKey(m, tea.KeyHome)
 	if !strings.Contains(assertFitsTerminal(t, m), "next") {
 		t.Fatal("Home should reveal the newest event")
+	}
+}
+
+func TestDeviceStatusVisibleAtDifferentWidths(t *testing.T) {
+	for _, width := range []int{120, 80, 32, 20} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := NewModel(Deps{})
+			for i, status := range []model.Status{model.StatusOnline, model.StatusStale, model.StatusOffline} {
+				m.devices = append(m.devices, &model.Device{
+					MAC: fmt.Sprintf("aa:00:00:00:00:0%d", i),
+					IPs: []net.IP{net.IPv4(192, 168, 0, byte(i+1))}, Status: status,
+				})
+			}
+			m = updateModel(m, tea.WindowSizeMsg{Width: width, Height: 12})
+			view := assertFitsTerminal(t, m)
+			rows := contentLines(view)[5:8]
+			for i, status := range []string{"online", "stale", "offline"} {
+				if width < 26 {
+					status = []string{"●", "·", "x"}[i]
+				}
+				if !strings.Contains(rows[i], status) || !strings.Contains(rows[i], fmt.Sprintf("192.168.0.%d", i+1)) {
+					t.Errorf("device IP and status should both be visible, row=%q", rows[i])
+				}
+			}
+		})
+	}
+}
+
+func TestDeviceDetailsExposeOmittedAndLongFields(t *testing.T) {
+	for _, width := range []int{120, 80, 20} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := NewModel(Deps{})
+			m.devices = []*model.Device{{
+				MAC: "02:00:00:00:00:01", IPs: []net.IP{net.ParseIP("192.168.1.234")},
+				Hostname: "averylonghostnamethatmustremainreadable.local", Vendor: "Example device manufacturer",
+				OSGuess: "Example operating system", Status: model.StatusOffline, RTT: 123 * time.Millisecond,
+				OpenPorts:  []model.Port{{Number: 54321, Proto: "tcp", Service: "example-service"}},
+				Services:   []model.ServiceInst{{Type: "_example._tcp", Name: "long service instance name", Port: 54321}},
+				RTTHistory: []time.Duration{456 * time.Millisecond},
+			}}
+			m = updateModel(m, tea.WindowSizeMsg{Width: width, Height: 10})
+			m = pressKey(m, tea.KeyEnter)
+			if !m.showDeviceDetails {
+				t.Fatal("Enter should open device details")
+			}
+			var displayed []string
+			for {
+				lines := contentLines(assertFitsTerminal(t, m))[5:]
+				displayed = append(displayed, lines[0])
+				next := pressKey(m, tea.KeyDown)
+				if next.detailScroll == m.detailScroll {
+					displayed = append(displayed, lines[1:]...)
+					break
+				}
+				m = next
+			}
+			text := strings.Join(strings.Fields(strings.Join(displayed, "\n")), "")
+			for _, want := range []string{
+				"192.168.1.234", "offline", "averylonghostnamethatmustremainreadable.local", "123ms",
+				"02:00:00:00:00:01", "Example device manufacturer", "Example operating system",
+				"54321/tcp (example-service)", "_example._tcp", "long service instance name", "456ms", "unconfirmed",
+			} {
+				if !strings.Contains(text, strings.Join(strings.Fields(want), "")) {
+					t.Errorf("field %q was not reachable by scrolling details:\n%s", want, strings.Join(displayed, "\n"))
+				}
+			}
+			if strings.Contains(text, "0001-") {
+				t.Fatal("zero timestamps should be shown as unknown/unconfirmed")
+			}
+			m = pressKey(m, tea.KeyEsc)
+			if m.showDeviceDetails || m.quitting || m.selectedRow != 0 {
+				t.Fatal("Esc should return to the selected device without quitting")
+			}
+			assertFitsTerminal(t, m)
+		})
+	}
+}
+
+func TestFilterBackspaceRemovesCompleteRune(t *testing.T) {
+	for _, tc := range []struct{ text, remaining, suffix string }{
+		{"é", "", "printer"},
+		{"界", "", "printer"},
+		{"café", "caf", "é"},
+		{"打印机", "打印", "机"},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			m := NewModel(Deps{})
+			m.devices = []*model.Device{{Hostname: tc.remaining + tc.suffix}, {Hostname: "other"}}
+			m.filterMode = true
+			m = updateModel(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.text)})
+			m = pressKey(m, tea.KeyBackspace)
+			if !utf8.ValidString(m.filterBuf) || m.filterBuf != tc.remaining {
+				t.Fatalf("Backspace corrupted the filter: got %q, want %q", m.filterBuf, tc.remaining)
+			}
+			m = updateModel(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.suffix)})
+			if got := filterDevices(m.devices, m.filterBuf); len(got) != 1 || got[0].Hostname != tc.remaining+tc.suffix {
+				t.Fatalf("subsequent typing should match the requested device, filter=%q", m.filterBuf)
+			}
+		})
 	}
 }

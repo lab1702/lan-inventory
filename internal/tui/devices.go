@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/lab1702/lan-inventory/internal/model"
 	"github.com/lab1702/lan-inventory/internal/oui"
 )
@@ -22,24 +24,10 @@ func (m Model) viewDevices() string {
 	var b strings.Builder
 	headers, rows, details := m.deviceLayout(devices)
 
-	const (
-		wIP     = 15
-		wMAC    = 17
-		wVendor = 12
-		wHost   = 22
-		wOS     = 12
-		wPorts  = 22
-		wRTT    = 8
-	)
-	headerCells := []string{
-		padRight(styleHeaderRow.Render("IP"), wIP),
-		padRight(styleHeaderRow.Render("MAC"), wMAC),
-		padRight(styleHeaderRow.Render("Vendor"), wVendor),
-		padRight(styleHeaderRow.Render("Hostname"), wHost),
-		padRight(styleHeaderRow.Render("OS"), wOS),
-		padRight(styleHeaderRow.Render("Ports"), wPorts),
-		padRight(styleHeaderRow.Render("RTT"), wRTT),
-		styleHeaderRow.Render("Status"),
+	columns := m.deviceColumns()
+	headerCells := make([]string, 0, len(columns))
+	for _, col := range columns {
+		headerCells = append(headerCells, padRight(styleHeaderRow.Render(col.name), col.width))
 	}
 	header := "  " + strings.Join(headerCells, "  ")
 	if headers > 0 {
@@ -47,7 +35,7 @@ func (m Model) viewDevices() string {
 		b.WriteString("\n")
 	}
 	if headers > 1 {
-		b.WriteString(styleDim.Render(strings.Repeat("-", visibleLen(header))))
+		b.WriteString(styleDim.Render(padRight("Enter: details", visibleLen(header))))
 		b.WriteString("\n")
 	}
 
@@ -59,45 +47,19 @@ func (m Model) viewDevices() string {
 		if i == m.selectedRow {
 			marker = "> "
 		}
-		// Compute the un-styled cell content once. Padding and per-cell
-		// styling depend on whether this row is selected: selected rows
-		// must be plain (no inner ANSI) so styleSelectedRow's Reverse
-		// attribute applies uniformly across the whole line — inner
-		// resets in styled cells would clobber it mid-row.
-		ipCell := firstIP(d)
-		macCell := d.MAC
-		vendorCell := truncate(d.Vendor, 12)
-		hostCell := truncate(d.Hostname, 22)
-		osCell := truncate(d.OSGuess, 12)
-		portsCell := truncate(portsCSV(d.OpenPorts), 22)
-		rttCell := rttString(d.RTT)
-		statusCell := d.Status.String()
-
-		var line string
+		cells := make([]string, 0, len(columns))
+		for _, col := range columns {
+			value := truncateCells(col.value(d), col.width)
+			// Selected rows use plain cells so an inner style reset cannot
+			// cancel the reverse style partway through the row.
+			if i != m.selectedRow && col.status {
+				value = styleStatus(d.Status).Render(value)
+			}
+			cells = append(cells, padRight(value, col.width))
+		}
+		line := marker + strings.Join(cells, "  ")
 		if i == m.selectedRow {
-			cells := []string{
-				padRight(ipCell, wIP),
-				padRight(macCell, wMAC),
-				padRight(vendorCell, wVendor),
-				padRight(hostCell, wHost),
-				padRight(osCell, wOS),
-				padRight(portsCell, wPorts),
-				padRight(rttCell, wRTT),
-				statusCell,
-			}
-			line = styleSelectedRow.Render(marker + strings.Join(cells, "  "))
-		} else {
-			cells := []string{
-				padRight(ipCell, wIP),
-				padRight(macCell, wMAC),
-				padRight(dimIfEmpty(vendorCell), wVendor),
-				padRight(dimIfEmpty(hostCell), wHost),
-				padRight(dimIfEmpty(osCell), wOS),
-				padRight(dimIfEmpty(portsCell), wPorts),
-				padRight(rttCell, wRTT),
-				styleStatus(d.Status).Render(statusCell),
-			}
-			line = marker + strings.Join(cells, "  ")
+			line = styleSelectedRow.Render(line)
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
@@ -107,6 +69,72 @@ func (m Model) viewDevices() string {
 		b.WriteString(strings.Join(details, "\n"))
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+type deviceColumn struct {
+	name   string
+	width  int
+	value  func(*model.Device) string
+	status bool
+}
+
+// IP and status are always first. Other columns appear only when they fit;
+// Enter opens the selected device's complete, scrollable details.
+func (m Model) deviceColumns() []deviceColumn {
+	columns := []deviceColumn{
+		{"IP", 15, firstIP, false},
+		{"Status", 7, func(d *model.Device) string { return d.Status.String() }, true},
+	}
+	if m.width < 26 {
+		columns[0].width = max(1, m.width-5)
+		columns[1] = deviceColumn{"S", 1, func(d *model.Device) string {
+			switch d.Status {
+			case model.StatusOnline:
+				return "●"
+			case model.StatusStale:
+				return "·"
+			case model.StatusOffline:
+				return "x"
+			default:
+				return "?"
+			}
+		}, true}
+		return columns
+	}
+	used := 26
+	optional := []deviceColumn{
+		{"MAC", 17, func(d *model.Device) string { return d.MAC }, false},
+		{"Hostname", 22, func(d *model.Device) string { return d.Hostname }, false},
+		{"Vendor", 12, func(d *model.Device) string { return d.Vendor }, false},
+		{"OS", 12, func(d *model.Device) string { return d.OSGuess }, false},
+		{"Ports", 22, func(d *model.Device) string { return portsCSV(d.OpenPorts) }, false},
+		{"RTT", 8, func(d *model.Device) string { return rttString(d.RTT) }, false},
+	}
+	for _, col := range optional {
+		if used+2+col.width <= m.width {
+			columns = append(columns, col)
+			used += 2 + col.width
+		}
+	}
+	return columns
+}
+
+// Truncate by display cells so wide Unicode text cannot displace a column.
+func truncateCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if lipgloss.Width(b.String()+string(r)) > width-1 {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String() + "…"
 }
 
 func filterDevices(in []*model.Device, q string) []*model.Device {
@@ -188,7 +216,7 @@ func detailStrip(d *model.Device) string {
 	}
 	b.WriteString(fmt.Sprintf("%s %s / %s\n",
 		styleAccent.Render("First/Last seen:"),
-		d.FirstSeen.Format(time.RFC3339), d.LastSeen.Format(time.RFC3339)))
+		seenTime(d.FirstSeen, "unknown"), seenTime(d.LastSeen, "unconfirmed")))
 	if len(d.RTTHistory) > 0 {
 		samples := make([]string, 0, len(d.RTTHistory))
 		for _, r := range d.RTTHistory {
@@ -197,6 +225,43 @@ func detailStrip(d *model.Device) string {
 		b.WriteString(fmt.Sprintf("%s %s\n", styleAccent.Render("RTT history:"), strings.Join(samples, " ")))
 	}
 	return b.String()
+}
+
+func seenTime(t time.Time, unknown string) string {
+	if t.IsZero() {
+		return unknown
+	}
+	return t.Format(time.RFC3339)
+}
+
+func (m Model) detailPageSize() int {
+	return max(1, m.contentHeight()-2)
+}
+
+func (m Model) deviceDetailLines() []string {
+	devices := filterDevices(m.devices, m.filterBuf)
+	sortDevices(devices)
+	if len(devices) == 0 {
+		return []string{"(no devices match)"}
+	}
+	d := devices[m.selectedRow]
+	ips := make([]string, 0, len(d.IPs))
+	for _, ip := range d.IPs {
+		ips = append(ips, ip.String())
+	}
+	content := fmt.Sprintf("IP: %s\nStatus: %s\nHostname: %s\nRTT: %s\n",
+		strings.Join(ips, ", "), d.Status.String(), d.Hostname, rttString(d.RTT))
+	content += strings.Join(contentLines(detailStrip(d))[1:], "\n")
+	// Wrapping before vertical scrolling makes every field, including long
+	// names and service lists, readable even in a narrow terminal.
+	return contentLines(lipgloss.NewStyle().Width(max(1, m.width)).Render(content))
+}
+
+func (m Model) viewDeviceDetails() string {
+	lines := m.deviceDetailLines()
+	end := min(len(lines), m.detailScroll+m.detailPageSize())
+	return styleBold.Render("Details: Esc back; ↑/↓ scroll") + "\n\n" +
+		strings.Join(lines[m.detailScroll:end], "\n")
 }
 
 func firstIP(d *model.Device) string {
@@ -219,31 +284,4 @@ func rttString(d time.Duration) string {
 		return "-"
 	}
 	return d.Round(100 * time.Microsecond).String()
-}
-
-// truncate shortens s to at most max runes, appending "…" when it cuts.
-// It counts and slices by rune, not byte, so multi-byte UTF-8 (accented
-// vendor names, localized hostnames) is never split mid-rune — which would
-// emit a broken glyph and throw off the rune-based column widths.
-func truncate(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max == 1 {
-		return string(r[:1])
-	}
-	return string(r[:max-1]) + "…"
-}
-
-// dimIfEmpty returns styleDim-rendered s when s is empty, "—", or "--".
-// Otherwise returns s unchanged.
-func dimIfEmpty(s string) string {
-	if s == "" || s == "—" || s == "--" {
-		return styleDim.Render(s)
-	}
-	return s
 }

@@ -93,4 +93,7 @@ func (m *Model) clampViewport() {
 		lastStart := max(0, len(contentLines(m.tabContent()))-m.contentHeight())
 		m.scrollRows[m.tab] = max(0, min(m.scrollRows[m.tab], lastStart))
 	}
+	if m.showDeviceDetails {
+		m.detailScroll = max(0, min(m.detailScroll, len(m.deviceDetailLines())-m.detailPageSize()))
+	}
 }

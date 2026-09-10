@@ -5,8 +5,8 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -166,16 +166,135 @@ func TestMDNSStartupFailuresStopEarlierResolvers(t *testing.T) {
 	}
 }
 
-func TestMDNSUnexpectedBrowseStopIsAnError(t *testing.T) {
+func TestMDNSEmptyBrowseExpirationRollsOver(t *testing.T) {
 	worker := mdnsTestWorker()
-	err := worker.run(context.Background(), make(chan Update), mdnsTestIface, func(net.Interface) (mdnsResolver, error) {
-		return &fakeMDNSResolver{browse: func(_ context.Context, _, _ string, entries chan<- *zeroconf.ServiceEntry) error {
-			close(entries)
-			return nil
-		}}, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "stopped unexpectedly") {
-		t.Errorf("Run error = %v, want unexpected browser closure", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	refresh := make(chan time.Time)
+	started := make(chan string, len(commonServiceTypes))
+	result := make(chan error, 1)
+	go func() {
+		result <- worker.runWithRefresh(ctx, make(chan Update), mdnsTestIface, func(net.Interface) (mdnsResolver, error) {
+			return &fakeMDNSResolver{browse: func(_ context.Context, service, _ string, entries chan<- *zeroconf.ServiceEntry) error {
+				started <- service
+				// zeroconf closes an unanswered browse after its backoff
+				// expires without returning an error from Browse.
+				close(entries)
+				return nil
+			}}, nil
+		}, refresh)
+	}()
+	for session := 0; session < 2; session++ {
+		services := make(map[string]bool)
+		for range commonServiceTypes {
+			select {
+			case service := <-started:
+				services[service] = true
+			case err := <-result:
+				t.Fatalf("empty browse ended the worker: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("empty service was not browsed again")
+			}
+		}
+		if len(services) != len(commonServiceTypes) {
+			t.Errorf("session %d browsed %d distinct services", session, len(services))
+		}
+		if session == 0 {
+			select {
+			case refresh <- time.Now():
+			case err := <-result:
+				t.Fatalf("empty browse ended the worker: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("worker did not wait for scheduled refresh")
+			}
+		}
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mDNS did not stop after cancellation")
+	}
+}
+
+func TestMDNSRefreshesKnownInstancesWithNewMetadata(t *testing.T) {
+	worker := mdnsTestWorker()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	refresh := make(chan time.Time)
+	out := make(chan Update, len(commonServiceTypes))
+	result := make(chan error, 1)
+	var created, closed atomic.Int32
+	go func() {
+		result <- worker.runWithRefresh(ctx, out, mdnsTestIface, func(net.Interface) (mdnsResolver, error) {
+			id := int(created.Add(1))
+			session := (id-1)/len(commonServiceTypes) + 1
+			if id == len(commonServiceTypes)+1 && int(closed.Load()) != len(commonServiceTypes) {
+				return nil, errors.New("new session started before old resolvers stopped")
+			}
+			return &fakeMDNSResolver{browse: func(ctx context.Context, service, _ string, entries chan<- *zeroconf.ServiceEntry) error {
+				go func() {
+					entry := zeroconf.NewServiceEntry("Same instance", service, "local.")
+					entry.AddrIPv4 = []net.IP{net.IPv4(192, 168, 1, 25)}
+					entry.HostName = fmt.Sprintf("host%d.local.", session)
+					entry.Port = 8000 + session
+					entry.Text = []string{fmt.Sprintf("version=%d", session)}
+					// A resolver sends each instance only once for its lifetime.
+					entries <- entry
+					<-ctx.Done()
+					closed.Add(1)
+					close(entries)
+				}()
+				return nil
+			}}, nil
+		}, refresh)
+	}()
+	for session := 1; session <= 2; session++ {
+		services := make(map[string]bool)
+		for range commonServiceTypes {
+			select {
+			case update := <-out:
+				if update.Hostname != fmt.Sprintf("host%d.local", session) || len(update.Services) != 1 {
+					t.Fatalf("session %d received stale or incomplete metadata: %+v", session, update)
+				}
+				service := update.Services[0]
+				services[service.Type] = true
+				if service.Name != "Same instance" || service.Port != 8000+session || service.TXT["version"] != fmt.Sprint(session) {
+					t.Errorf("session %d service metadata: %+v", session, service)
+				}
+			case err := <-result:
+				t.Fatalf("worker ended before refreshing known instance: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("known instance was not discovered again")
+			}
+		}
+		if len(services) != len(commonServiceTypes) || !services["_apple-mobdev2._tcp"] || !services["_device-info._tcp"] {
+			t.Errorf("session %d missing service types: %v", session, services)
+		}
+		if session == 1 {
+			select {
+			case refresh <- time.Now():
+			case err := <-result:
+				t.Fatalf("worker ended before refresh: %v", err)
+			case <-time.After(time.Second):
+				t.Fatal("worker did not wait for scheduled refresh")
+			}
+		}
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("mDNS did not stop after cancellation")
+	}
+	if int(created.Load()) != 2*len(commonServiceTypes) || closed.Load() != created.Load() {
+		t.Errorf("created %d resolvers, stopped %d", created.Load(), closed.Load())
 	}
 }
 

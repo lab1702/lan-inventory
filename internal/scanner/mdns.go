@@ -30,12 +30,18 @@ var commonServiceTypes = []string{
 	"_https._tcp",
 	"_ssh._tcp",
 	"_airplay._tcp",
+	"_apple-mobdev2._tcp",
+	"_device-info._tcp",
 	"_googlecast._tcp",
 	"_printer._tcp",
 	"_ipp._tcp",
 	"_smb._tcp",
 	"_workstation._tcp",
 }
+
+// zeroconf suppresses repeat instances for a browse's entire lifetime. Start
+// fresh sessions so announcements keep devices online and update their metadata.
+const mdnsRefreshInterval = 30 * time.Second
 
 type mdnsResolver interface {
 	Browse(context.Context, string, string, chan<- *zeroconf.ServiceEntry) error
@@ -53,6 +59,12 @@ func (w *MDNSWorker) Run(ctx context.Context, out chan<- Update) error {
 }
 
 func (w *MDNSWorker) run(ctx context.Context, out chan<- Update, lookupIface func(string) (*net.Interface, error), newResolver func(net.Interface) (mdnsResolver, error)) error {
+	refresh := time.NewTicker(mdnsRefreshInterval)
+	defer refresh.Stop()
+	return w.runWithRefresh(ctx, out, lookupIface, newResolver, refresh.C)
+}
+
+func (w *MDNSWorker) runWithRefresh(ctx context.Context, out chan<- Update, lookupIface func(string) (*net.Interface, error), newResolver func(net.Interface) (mdnsResolver, error), refresh <-chan time.Time) error {
 	if w.Iface == nil || w.Iface.Subnet == nil {
 		return fmt.Errorf("mDNS interface and subnet are required")
 	}
@@ -64,20 +76,28 @@ func (w *MDNSWorker) run(ctx context.Context, out chan<- Update, lookupIface fun
 		return fmt.Errorf("mDNS interface %s: %w", w.Iface.Name, err)
 	}
 
+	for ctx.Err() == nil {
+		if err := w.browseSession(ctx, out, *iface, newResolver, refresh); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *MDNSWorker) browseSession(ctx context.Context, out chan<- Update, iface net.Interface, newResolver func(net.Interface) (mdnsResolver, error), refresh <-chan time.Time) error {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	defer func() {
 		cancel()
 		wg.Wait()
 	}()
-	failures := make(chan error, len(commonServiceTypes))
 	for _, svc := range commonServiceTypes {
 		if ctx.Err() != nil {
 			return nil
 		}
 		// Each Browse starts readers on its resolver's sockets. Sharing one
 		// resolver would let competing readers discard other services' replies.
-		resolver, err := newResolver(*iface)
+		resolver, err := newResolver(iface)
 		if err != nil {
 			return fmt.Errorf("zeroconf resolver for %s: %w", svc, err)
 		}
@@ -86,9 +106,6 @@ func (w *MDNSWorker) run(ctx context.Context, out chan<- Update, lookupIface fun
 		go func() {
 			defer wg.Done()
 			w.consume(ctx, svc, entries, out)
-			if ctx.Err() == nil {
-				failures <- fmt.Errorf("mDNS browse for %s stopped unexpectedly", svc)
-			}
 		}()
 		// Browse returns after initialization; its mainloop closes entries on
 		// cancellation, including when the initial query fails.
@@ -98,10 +115,11 @@ func (w *MDNSWorker) run(ctx context.Context, out chan<- Update, lookupIface fun
 	}
 	select {
 	case <-ctx.Done():
-		return nil
-	case err := <-failures:
-		return err
+	case <-refresh:
 	}
+	// An empty browse can expire inside zeroconf and close entries without an
+	// error. The next scheduled session retries it along with discovered types.
+	return nil
 }
 
 func (w *MDNSWorker) consume(ctx context.Context, svc string, entries <-chan *zeroconf.ServiceEntry, out chan<- Update) {

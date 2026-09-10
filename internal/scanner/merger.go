@@ -72,9 +72,8 @@ func (m *Merger) Snapshot() []*model.Device {
 // (those keyed by MAC). IP-only entries are excluded since they were created
 // by the active worker itself and don't constitute independent confirmation.
 //
-// Used by the active worker to skip the liveness gate for IPs we already
-// know are real — e.g., Windows hosts that stealth-drop ICMP and TCP probes
-// but were captured by the passive ARP listener.
+// Used by the active worker to try enrichment on known identities, including
+// cached neighbors. Membership does not prove that a host is currently alive.
 func (m *Merger) KnownIPs() map[string]struct{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -176,14 +175,22 @@ func (m *Merger) handleUpdate(u Update, out chan<- model.DeviceEvent) {
 		return // can't key this update
 	}
 
+	wasOffline := dev.Status == model.StatusOffline
+	firstObservation := dev.LastSeen.IsZero()
+	if created && u.Source == "arp-seed" {
+		dev.Status = model.StatusStale
+	}
 	if u.Hostname != "" && (u.Source == "mdns" || m.hostnameSource[dev] != "mdns") {
 		dev.Hostname = u.Hostname
 		m.hostnameSource[dev] = u.Source
 	}
 	mergeUpdate(dev, u)
+	if u.Source == "arp-seed" {
+		return // cached identity is neither a fresh sighting nor a Joined event
+	}
 
 	evt := model.DeviceEvent{Device: copyDevice(dev)}
-	if created {
+	if created || wasOffline || firstObservation {
 		evt.Type = model.EventJoined
 	} else {
 		evt.Type = model.EventUpdated
@@ -209,6 +216,9 @@ func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- mode
 	// every worker feeding the updates channel — if the Events consumer is slow.
 	var leftEvents []model.DeviceEvent
 	transition := func(d *model.Device) {
+		if d.LastSeen.IsZero() {
+			return // cached identity has no observed liveness to age
+		}
 		switch {
 		case d.LastSeen.Before(leftCut):
 			if d.Status != model.StatusOffline {
@@ -229,7 +239,7 @@ func (m *Merger) sweepStatus(ctx context.Context, now time.Time, out chan<- mode
 	}
 	m.mu.Unlock()
 
-	// EventLeft is a one-shot transition (at most once per device per session)
+	// EventLeft is emitted once per transition to Offline
 	// — block briefly so a bursty disappearance doesn't lose entries from the
 	// Events tab, but only now that the lock is released.
 	for _, e := range leftEvents {
@@ -264,8 +274,11 @@ func mergeUpdate(dev *model.Device, u Update) {
 		dev.OpenPorts = u.OpenPorts
 	}
 	for _, s := range u.Services {
-		if !containsService(dev.Services, s) {
+		i := serviceIndex(dev.Services, s)
+		if i < 0 {
 			dev.Services = append(dev.Services, s)
+		} else {
+			dev.Services[i] = s // refresh the instance's port and TXT data
 		}
 	}
 	if u.RTT > 0 {
@@ -281,15 +294,15 @@ func mergeUpdate(dev *model.Device, u Update) {
 	if u.NBNSResponded {
 		dev.NBNSResponded = true
 	}
-	if u.Time.After(dev.LastSeen) {
-		dev.LastSeen = u.Time
+	if u.Source != "arp-seed" {
+		if u.Time.After(dev.LastSeen) {
+			dev.LastSeen = u.Time
+		}
+		dev.Status = model.StatusOnline
 	}
 	if dev.FirstSeen.IsZero() {
 		dev.FirstSeen = u.Time
 	}
-	// Any received update means we just heard from the device — Online.
-	// The sweep handles decay back to Stale/Offline based on age.
-	dev.Status = model.StatusOnline
 	sort.Slice(dev.OpenPorts, func(i, j int) bool { return dev.OpenPorts[i].Number < dev.OpenPorts[j].Number })
 	dev.OSGuess = probe.OSDetect(dev, dev.NBNSResponded)
 }
@@ -310,7 +323,7 @@ func mergeFromIPOnly(dst, src *model.Device) {
 		dst.OpenPorts = src.OpenPorts
 	}
 	for _, s := range src.Services {
-		if !containsService(dst.Services, s) {
+		if serviceIndex(dst.Services, s) < 0 {
 			dst.Services = append(dst.Services, s)
 		}
 	}
@@ -325,6 +338,7 @@ func mergeFromIPOnly(dst, src *model.Device) {
 	}
 	if src.LastSeen.After(dst.LastSeen) {
 		dst.LastSeen = src.LastSeen
+		dst.Status = src.Status
 	}
 	if dst.TTL == 0 {
 		dst.TTL = src.TTL
@@ -355,13 +369,13 @@ func (m *Merger) findInMACByIP(ip net.IP) *model.Device {
 	return nil
 }
 
-func containsService(list []model.ServiceInst, s model.ServiceInst) bool {
-	for _, x := range list {
-		if x.Type == s.Type && x.Name == s.Name && x.Port == s.Port {
-			return true
+func serviceIndex(list []model.ServiceInst, s model.ServiceInst) int {
+	for i, x := range list {
+		if x.Type == s.Type && x.Name == s.Name {
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func copyDevice(d *model.Device) *model.Device {

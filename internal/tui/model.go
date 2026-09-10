@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -49,11 +50,13 @@ type Model struct {
 	quitting     bool
 
 	// Devices-tab interaction state
-	filterBuf   string // current filter text
-	filterMode  bool   // true while typing filter
-	selectedRow int    // selected device index after sort+filter
-	scrollRows  [4]int // first visible row in each tab
-	rescanNonce int    // bumped by 'r' to signal scanner (consumed via Deps.OnRescan)
+	filterBuf         string // current filter text
+	filterMode        bool   // true while typing filter
+	selectedRow       int    // selected device index after sort+filter
+	scrollRows        [4]int // first visible row in each tab
+	rescanNonce       int    // bumped by 'r' to signal scanner (consumed via Deps.OnRescan)
+	showDeviceDetails bool
+	detailScroll      int
 
 	// help overlay
 	showHelp bool
@@ -119,7 +122,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 				m.filterBuf = ""
 			case tea.KeyBackspace:
 				if n := len(m.filterBuf); n > 0 {
-					m.filterBuf = m.filterBuf[:n-1]
+					_, size := utf8.DecodeLastRuneInString(m.filterBuf)
+					m.filterBuf = m.filterBuf[:n-size]
 				}
 			case tea.KeyRunes:
 				m.filterBuf += string(msg.Runes)
@@ -129,6 +133,31 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.showHelp {
 			m.showHelp = false
 			return m, nil
+		}
+		if m.showDeviceDetails && m.tab == tabDevices {
+			switch msg.String() {
+			case "esc", "enter":
+				m.showDeviceDetails = false
+				return m, nil
+			case "up", "k":
+				m.detailScroll--
+				return m, nil
+			case "down", "j":
+				m.detailScroll++
+				return m, nil
+			case "pgup":
+				m.detailScroll -= m.detailPageSize()
+				return m, nil
+			case "pgdown":
+				m.detailScroll += m.detailPageSize()
+				return m, nil
+			case "home":
+				m.detailScroll = 0
+				return m, nil
+			case "end":
+				m.detailScroll = len(m.deviceDetailLines())
+				return m, nil
+			}
 		}
 		switch msg.String() {
 		case "esc":
@@ -143,13 +172,23 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, tea.Quit
 		case "1":
 			m.tab = tabDevices
+			m.showDeviceDetails = false
 		case "2":
 			m.tab = tabServices
+			m.showDeviceDetails = false
 		case "3":
 			m.tab = tabSubnet
+			m.showDeviceDetails = false
 		case "4":
 			m.tab = tabEvents
+			m.showDeviceDetails = false
+		case "enter":
+			if m.tab == tabDevices && len(filterDevices(m.devices, m.filterBuf)) > 0 {
+				m.showDeviceDetails = true
+				m.detailScroll = 0
+			}
 		case "/":
+			m.showDeviceDetails = false
 			m.filterMode = true
 			m.filterBuf = ""
 		case "r":
@@ -217,7 +256,11 @@ func (m Model) View() string {
 	b.WriteString("\n\n")
 	switch m.tab {
 	case tabDevices:
-		b.WriteString(m.viewDevices())
+		if m.showDeviceDetails {
+			b.WriteString(m.viewDeviceDetails())
+		} else {
+			b.WriteString(m.viewDevices())
+		}
 	case tabServices:
 		b.WriteString(m.scrollContent(m.viewServices()))
 	case tabSubnet:
@@ -250,7 +293,8 @@ func helpText() string {
 		{"↑/↓ or k/j", "select devices / scroll the current tab"},
 		{"PgUp/PgDn", "move one page"},
 		{"Home/End", "first/last row (Home shows newest events)"},
-		{"Enter", "(in filter mode) apply the filter"},
+		{"Enter", "open device details / apply a filter; Esc returns"},
+		{"● / · / x", "compact device status: online / stale / offline"},
 		{"/", "start filter (typing narrows the device list; Enter applies)"},
 		{"r", "force a rescan now"},
 		{"?", "toggle this help"},

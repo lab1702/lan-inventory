@@ -140,6 +140,11 @@ func (w *ActiveWorker) probeOne(ctx context.Context, ip net.IP, isKnown bool, ou
 		// TCP signal of life (success or RST) — proceed without TTL/RTT.
 		alive = true
 	}
+	if !alive && !isKnown && w.KnownIPs != nil {
+		// Probing can itself cause an ARP exchange. Include identities learned
+		// during this sweep before deciding whether to try UDP enrichment.
+		_, isKnown = w.KnownIPs()[ip.String()]
+	}
 	if !alive && !isKnown {
 		return
 	}

@@ -99,6 +99,7 @@ lan-inventory --version
 - `↑/↓` or `j/k` select devices or scroll the current tab
 - `PgUp/PgDn` move one page; `Home/End` move to the first/last row
 - `Home` in Events returns to the newest events
+- `Enter` in Devices opens full, scrollable details; `Esc` returns to the list
 - `/` filter (Enter or Esc exits filter input; clear with Backspace)
 - `r` force a rescan
 - `q`, `Esc`, or `Ctrl+C` quit

@@ -98,3 +98,21 @@ func TestCancelledEnrichmentDoesNotClearPorts(t *testing.T) {
 		t.Fatal("cancelled enrichment published a partial scan")
 	}
 }
+
+func TestActiveEnrichesARPLearnedDuringSweep(t *testing.T) {
+	m := NewMerger(MergerOptions{})
+	events := make(chan model.DeviceEvent, 2)
+	ip := net.ParseIP("192.168.1.99")
+	p := silentProbes()
+	p.ping = func(context.Context, string) (probe.PingResult, error) {
+		m.handleUpdate(Update{Source: "arp", IP: ip, MAC: "aa:bb:cc:dd:ee:99", Time: time.Now()}, events)
+		return probe.PingResult{}, nil
+	}
+	p.nbns = func(context.Context, string) string { return "NEW-WINDOWS" }
+	out := make(chan Update, 2)
+	w := &ActiveWorker{HostIPs: []net.IP{ip}, KnownIPs: m.KnownIPs, probes: p}
+	w.SweepOnce(context.Background(), out)
+	if len(out) != 1 || !(<-out).NBNSResponded {
+		t.Fatal("host learned by ARP during sweep missed NBNS enrichment")
+	}
+}

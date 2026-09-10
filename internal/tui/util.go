@@ -2,27 +2,17 @@
 
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // visibleLen returns the number of printed cells in s, ignoring ANSI escape
 // sequences. Use this instead of len() when sizing columns that may contain
 // styled content.
 func visibleLen(s string) int {
-	out, in := 0, false
-	for _, r := range s {
-		if r == 0x1b {
-			in = true
-			continue
-		}
-		if in {
-			if r == 'm' {
-				in = false
-			}
-			continue
-		}
-		out++
-	}
-	return out
+	return lipgloss.Width(s)
 }
 
 // padRight pads s with spaces on the right until visibleLen(s) == w. ANSI

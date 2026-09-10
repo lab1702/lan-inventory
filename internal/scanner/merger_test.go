@@ -331,3 +331,63 @@ func TestMergerPrefersMDNSHostnameAcrossIdentityMigration(t *testing.T) {
 		})
 	}
 }
+
+func TestMergerSeedIsIdentityWithoutFreshLiveness(t *testing.T) {
+	m := NewMerger(MergerOptions{})
+	events := make(chan model.DeviceEvent, 10)
+	ip := net.ParseIP("192.168.1.50")
+	now := time.Now()
+	m.handleUpdate(Update{Source: "arp-seed", IP: ip, MAC: "aa:bb:cc:dd:ee:01", Vendor: "Example", Time: now}, events)
+	d := m.Snapshot()[0]
+	if d.MAC == "" || d.Vendor != "Example" || !d.LastSeen.IsZero() || d.Status != model.StatusStale {
+		t.Fatalf("seed implies fresh liveness: %+v", d)
+	}
+	m.sweepStatus(context.Background(), now.Add(time.Hour), events)
+	if len(events) != 0 {
+		t.Fatal("cached identity generated Joined/Left without being seen")
+	}
+	if _, ok := m.KnownIPs()[ip.String()]; !ok {
+		t.Fatal("cached identity must remain available for enrichment")
+	}
+	m.handleUpdate(Update{Source: "active", IP: ip, Alive: true, Time: now}, events)
+	if e := <-events; e.Type != model.EventJoined || e.Device.Status != model.StatusOnline || !e.Device.LastSeen.Equal(now) {
+		t.Fatalf("first actual sighting = %+v", e)
+	}
+	m.handleUpdate(Update{Source: "arp-seed", IP: ip, MAC: "aa:bb:cc:dd:ee:01", Time: now.Add(time.Hour)}, events)
+	if !m.Snapshot()[0].LastSeen.Equal(now) {
+		t.Fatal("later cached identity refreshed LastSeen")
+	}
+}
+
+func TestMergerReturningDeviceEmitsJoined(t *testing.T) {
+	for _, mac := range []string{"", "aa:bb:cc:dd:ee:01"} {
+		t.Run(mac, func(t *testing.T) {
+			m := NewMerger(MergerOptions{})
+			events := make(chan model.DeviceEvent, 10)
+			now := time.Now()
+			u := Update{Source: "active", IP: net.ParseIP("192.168.1.50"), MAC: mac, Alive: true, Time: now}
+			m.handleUpdate(u, events)
+			m.sweepStatus(context.Background(), now.Add(10*time.Minute), events)
+			u.Time = now.Add(11 * time.Minute)
+			m.handleUpdate(u, events)
+			for _, want := range []model.EventType{model.EventJoined, model.EventLeft, model.EventJoined} {
+				if got := (<-events).Type; got != want {
+					t.Fatalf("event = %v, want %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestMergerRefreshesServicePortAndTXT(t *testing.T) {
+	m := NewMerger(MergerOptions{})
+	out := make(chan model.DeviceEvent, 10)
+	u := Update{Source: "mdns", IP: net.ParseIP("192.168.1.50"), Time: time.Now(), Services: []model.ServiceInst{{Type: "_http._tcp", Name: "site", Port: 80, TXT: map[string]string{"path": "/old"}}}}
+	m.handleUpdate(u, out)
+	u.Services = []model.ServiceInst{{Type: "_http._tcp", Name: "site", Port: 8080, TXT: map[string]string{"path": "/new"}}}
+	m.handleUpdate(u, out)
+	got := m.Snapshot()[0].Services
+	if len(got) != 1 || got[0].Port != 8080 || got[0].TXT["path"] != "/new" {
+		t.Fatalf("service data stayed stale or duplicated: %+v", got)
+	}
+}

@@ -27,10 +27,9 @@ const zeroMAC = "00:00:00:00:00:00"
 //   - has the ATF_COM flag set,
 //   - has a non-zero, parseable MAC.
 //
-// Updates use Source "arp-seed" and the supplied now timestamp; the merger
-// treats them like any other ARP sighting, populating MAC + Vendor for hosts
-// the kernel already knows but for which no ARP traffic has crossed the wire
-// during the scan window.
+// Updates use Source "arp-seed" and the supplied discovery timestamp. The
+// merger populates MAC + Vendor without claiming a fresh liveness observation:
+// a complete cached entry can remain after its host has disconnected.
 func parseProcNetARP(r io.Reader, ifaceName string, subnet *net.IPNet, now time.Time) []Update {
 	var out []Update
 	sc := bufio.NewScanner(r)
